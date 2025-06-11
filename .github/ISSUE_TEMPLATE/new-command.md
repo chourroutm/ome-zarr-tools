@@ -13,5 +13,7 @@ assignees: ''
 <!-- Describe what it does -->
 
 <!-- Describe its arguments -->
+**Arguments:**
 
 <!-- Describe its dependencies -->
+**Dependencies:**
