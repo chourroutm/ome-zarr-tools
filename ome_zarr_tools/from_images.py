@@ -62,7 +62,6 @@ def from_images(stack_dir, stack_files, stack_pattern, vol_file,
         try:
             import dask_image.imread
             arr = dask_image.imread.imread(sources)
-            # dask-image reads shape (n, y, x), stack-to-chunk expects (y, x, z)
             arr = arr.transpose(1, 2, 0)
         except ImportError:
             import imageio.v3 as iio
@@ -71,21 +70,16 @@ def from_images(stack_dir, stack_files, stack_pattern, vol_file,
             arr = da.from_array(np.stack(imgs, axis=-1), chunks="auto")
 
     # --- Use stack-to-chunk to convert to OME-Zarr ---
-    # The chunk size can be configurable; here we use (64, 64, 64) for demo
     chunk_shape = (64, 64, 64)
-    # The axis order is assumed to be ZYX unless specified
     axis_names = list(axis_order) if axis_order else ["z", "y", "x"]
-    # stack-to-chunk expects voxel_size as a tuple of 3 floats
     voxel_size_tuple = tuple(voxel_size) if voxel_size else (1.0, 1.0, 1.0)
 
-    # Import stack-to-chunk API
     try:
         from stack_to_chunk import MultiScaleGroup
         from pydantic_zarr.v3 import NamedConfig, ArraySpec
     except ImportError:
         raise click.ClickException("stack-to-chunk is not installed. Please install it to use this feature.")
 
-    # Make the ArraySpec for stack-to-chunk
     array_spec = ArraySpec.from_array(
         arr,
         chunk_grid=NamedConfig(
@@ -95,7 +89,6 @@ def from_images(stack_dir, stack_files, stack_pattern, vol_file,
         codecs=(NamedConfig(name="bytes"), NamedConfig(name="zstd", configuration={"level": 2}))
     )
 
-    # Create the MultiScaleGroup and add full resolution data
     group = MultiScaleGroup(
         output_zarr,
         name="ome_zarr",
