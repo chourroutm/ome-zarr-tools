@@ -1,5 +1,3 @@
-````markdown
-name=README.md
 # OME-Zarr Tools CLI
 
 Command-line tools for working with OME-Zarr datasets.
@@ -40,4 +38,3 @@ ome-zarr-tools [subcommand] [OPTIONS]
 ## Development
 
 To add more features or change options, see the Python files in `ome_zarr_tools/`.
-````
