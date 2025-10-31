@@ -1,6 +1,6 @@
 # OME-Zarr Tools CLI
 
-Command-line tools for working with OME-Zarr datasets.
+Command-line tools for working with OME-Zarr multiscale datasets (also known as OME-NGFF). It is currently designed for [the OME-Zarr 0.5 specifications](https://ngff.openmicroscopy.org/0.5/index.html).
 
 ## Installation
 
@@ -24,13 +24,13 @@ ome-zarr-tools [subcommand] [OPTIONS]
       --voxel_size, --voxel_size_unit, --axis_order
 
 - `extract`:
-    Extract images from a Zarr store.
+    Extract images from an OME-Zarr multiscale dataset.
 
 - `fix_metadata`:
-    Fix metadata in a Zarr store.
+    Fix metadata in an OME-Zarr multiscale dataset.
 
 - `apply_mask`:
-    Apply a mask file to a Zarr store.
+    Apply a mask file to an OME-Zarr multiscale dataset.
 
 - `config`:
     Show, set, or reset configuration.
