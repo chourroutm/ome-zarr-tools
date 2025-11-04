@@ -1,50 +1,27 @@
 from pathlib import Path
+import logging
+from typing import Tuple
+
 import click
 import zarr
 import numpy as np
 import dask.array as da
-import joblib
-import shutil
-import tempfile
 import skimage.measure
 
+LOGGER = logging.getLogger(__name__)
+
 
 # ------------------------------------------------------------------------------
-# Upsampling utilities
+# Upsampling / downsampling utilities
 # ------------------------------------------------------------------------------
-
-@joblib.delayed
-def _copy(
-    arr_in: zarr.Array,
-    arr_out: zarr.Array,
-    x: int,
-    y: int,
-    z: int,
-    upsample_factor: int,
-) -> None:
-    """Copy a chunk and upsample by factor using nearest-neighbor repeat."""
-    source = arr_in[
-        x : x + arr_in.chunks[0],
-        y : y + arr_in.chunks[1],
-        z : z + arr_in.chunks[2],
-    ]
-    if np.all(source == arr_in.fill_value):
-        return
-
-    arr_out[
-        x * upsample_factor : (x + arr_in.chunks[0]) * upsample_factor,
-        y * upsample_factor : (y + arr_in.chunks[1]) * upsample_factor,
-        z * upsample_factor : (z + arr_in.chunks[2]) * upsample_factor,
-    ] = (
-        np.array(source)
-        .repeat(upsample_factor, axis=0)
-        .repeat(upsample_factor, axis=1)
-        .repeat(upsample_factor, axis=2)
-    )
 
 
 def upsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
-    """Upsample by factor 2 using nearest-neighbor repeat (lazy)."""
+    """Upsample by integer factor using nearest-neighbor repeat (lazy).
+
+    Currently only factor == 2 is supported to match the rest of the package
+    expectations (pyramidal scales differing by factor 2).
+    """
     if factor != 2:
         raise ValueError("Only upsample factor 2 is supported.")
     return (
@@ -55,25 +32,27 @@ def upsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
     )
 
 
-# ------------------------------------------------------------------------------
-# Downsampling utilities (stack-to-chunk style)
-# ------------------------------------------------------------------------------
-
 def downsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
     """
-    Downsample lazily by local mean pooling (stack-to-chunk style) using skimage.block_reduce.
+    Downsample lazily by local mean pooling (stack-to-chunk style) using
+    skimage.measure.block_reduce.
+
+    The implementation wraps block_reduce inside a map_blocks call so the overall
+    operation remains lazy and can be executed by Dask.
     """
     if factor != 2:
         raise ValueError("Only downsample factor 2 is supported.")
-    # skimage.block_reduce is not lazy, so we use Dask-map_blocks wrapper
-    def _reduce_block(block):
-        # pad to even dimensions
+
+    def _reduce_block(block: np.ndarray) -> np.ndarray:
+        # pad to even dimensions so block_reduce with block_size=(2,2,2) works
         pads = np.array(block.shape) % factor
-        pad_width = [(0, p) for p in pads]
-        block = np.pad(block, pad_width, mode="edge")
+        pad_width = [(0, int(p)) for p in pads]
+        if any(p != 0 for p in pads):
+            block = np.pad(block, pad_width, mode="edge")
         return skimage.measure.block_reduce(block, block_size=(2, 2, 2), func=np.mean)
 
-    new_chunks = tuple(max(1, c // factor) for c in mask_da.chunksize)
+    # derive new chunks from existing dask chunks (each entry in mask_da.chunks is a tuple)
+    new_chunks: Tuple[int, ...] = tuple(max(1, c[0] // factor) for c in mask_da.chunks)
     return mask_da.map_blocks(_reduce_block, dtype=mask_da.dtype, chunks=new_chunks)
 
 
@@ -81,22 +60,39 @@ def downsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
 # Main CLI
 # ------------------------------------------------------------------------------
 
+
 @click.command()
-@click.option("--volume", required=True, type=click.Path(exists=True, file_okay=False),
-              help="Path to OME-Zarr volume.")
-@click.option("--mask", required=True, type=click.Path(exists=True, file_okay=False),
-              help="Path to OME-Zarr mask.")
-@click.option("--threshold", default=0.5, show_default=True, type=float,
-              help="Threshold to binarize the mask.")
-@click.option("--temporary_upsample", is_flag=True,
-              help="Use a temporary directory for mask upsampling.")
-def apply_mask(volume, mask, threshold, temporary_upsample):
+@click.option(
+    "--volume",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Path to OME-Zarr volume.",
+)
+@click.option(
+    "--mask",
+    required=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Path to OME-Zarr mask.",
+)
+@click.option(
+    "--threshold",
+    default=0.5,
+    show_default=True,
+    type=float,
+    help="Threshold to binarize the mask.",
+)
+@click.option(
+    "--temporary_upsample",
+    is_flag=True,
+    help="(Unused) kept for CLI compatibility with other tools.",
+)
+def apply_mask(volume: str, mask: str, threshold: float, temporary_upsample: bool) -> None:
     """
     Apply a binary mask to an OME-Zarr volume.
 
-    Both inputs must be OME-Zarr directories.
-    One of the scales must match; the mask is upsampled or downsampled
-    by a factor 2 as needed, then applied lazily to all scales.
+    Both inputs must be OME-Zarr directories. One of the scales must match; the
+    mask is upsampled or downsampled by a factor 2 as needed, then applied lazily
+    to all scales.
     """
     volume_path = Path(volume)
     mask_path = Path(mask)
@@ -105,7 +101,7 @@ def apply_mask(volume, mask, threshold, temporary_upsample):
     volume_store = zarr.open_group(volume_path, mode="r+")
     mask_store = zarr.open_group(mask_path, mode="r")
 
-    # Find a matching scale
+    # Find a matching scale key that exists in both stores
     matching_scale = next((k for k in volume_store.keys() if k in mask_store), None)
     if matching_scale is None:
         raise click.ClickException("No matching scale between volume and mask.")
@@ -117,7 +113,7 @@ def apply_mask(volume, mask, threshold, temporary_upsample):
     # Binarize mask
     mask_da = (mask_arr > threshold).astype(np.uint8)
 
-    # Match resolutions
+    # Match resolutions between mask and volume: either upsample or downsample
     if mask_da.shape < vol_arr.shape:
         click.echo("Upsampling mask by factor 2...")
         mask_da = upsample_mask(mask_da)
@@ -125,7 +121,7 @@ def apply_mask(volume, mask, threshold, temporary_upsample):
         click.echo("Downsampling mask by factor 2...")
         mask_da = downsample_mask(mask_da)
 
-    # Apply lazily to all scales
+    # Apply lazily to all scales present in the volume store
     for scale_key, vol_z in volume_store.items():
         click.echo(f"Applying mask to scale {scale_key}...")
         vol_da = da.from_zarr(vol_z)
@@ -135,7 +131,11 @@ def apply_mask(volume, mask, threshold, temporary_upsample):
             continue
 
         masked_da = vol_da * mask_da
-        masked_da.to_zarr(vol_z.store, overwrite=True, compute=True)
+
+        # Write masked data back to the same zarr array. Use the array's store and
+        # path (component) so we target the same array inside the group.
+        # to_zarr is invoked with compute=True so the operation runs here.
+        masked_da.to_zarr(vol_z.store, component=vol_z.path, overwrite=True, compute=True)
 
     click.echo("Mask application complete.")
 
