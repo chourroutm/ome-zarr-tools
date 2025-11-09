@@ -1,6 +1,6 @@
 # OME-Zarr Tools CLI
 
-Command-line tools for working with OME-Zarr multiscale datasets (also known as OME-NGFF). It is currently designed for [the OME-Zarr 0.5 specifications](https://ngff.openmicroscopy.org/0.5/index.html).
+Command-line tools for working with OME-Zarr multiscale datasets (also known as OME-NGFF). It is currently designed for [the OME-Zarr 0.4 specifications](https://ngff.openmicroscopy.org/0.4/index.html).
 
 ## Installation
 
