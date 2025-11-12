@@ -9,8 +9,6 @@ from pathlib import Path
 @click.command()
 @click.option("--stack_dir", type=click.Path(exists=True), required=False,
               help="Path to directory with one type of files as slices (2D stack).")
-@click.option("--stack_files", multiple=True, type=click.Path(exists=True), required=False,
-              help="Shell-expanded list of filenames as slices (2D stack).")
 @click.option("--stack_pattern", type=str, required=False,
               help='String with a wildcard that gets expanded by Python (e.g. "/path/to/stack/*.jp2").')
 @click.option("--vol_file", type=click.Path(exists=True), required=False,
@@ -26,7 +24,7 @@ from pathlib import Path
 @click.option("--num_processes", default=1, required=False,
               help="Number of processes (default: 1).")
 @click.argument("output_zarr", type=click.Path())
-def from_images(stack_dir, stack_files, stack_pattern, vol_file,
+def from_images(stack_dir, stack_pattern, vol_file,
                 voxel_size, voxel_size_unit, num_downsampling, chunk_size, num_processes, output_zarr):
     """
     Convert images from a stack of 2D slices or a 3D image file to OME-Zarr format at OUTPUT_ZARR
@@ -37,9 +35,6 @@ def from_images(stack_dir, stack_files, stack_pattern, vol_file,
     if stack_dir:
         sources = natsorted([os.path.join(stack_dir, fname) for fname in os.listdir(stack_dir)])
         click.echo(f"Using all {len(sources)} files in directory: {stack_dir}")
-    # elif stack_files:
-    #     sources = list(stack_files)
-    #     click.echo(f"Using explicit list of slice files: {sources}")
     elif stack_pattern:
         sources = natsorted(glob.glob(stack_pattern))
         click.echo(f"Using pattern '{stack_pattern}' expanded to {len(sources)} files")
@@ -61,7 +56,7 @@ def from_images(stack_dir, stack_files, stack_pattern, vol_file,
         # Use dask-image for large 3D files; fallback to dask from numpy if not
         try:
             import dask_image.imread
-            arr = dask_image.imread.imread(vol_file)
+            arr = dask_image.imread.imread(vol_file).rechunk(chunk_shape)
         except (ImportError,UnknownFormatError) as e:
         
             import imageio.v3 as iio
@@ -72,7 +67,7 @@ def from_images(stack_dir, stack_files, stack_pattern, vol_file,
         try:
             import dask_image.imread
             arr = dask_image.imread.imread(sources)
-            arr = arr.transpose(1, 2, 0)
+            arr = arr.transpose(1, 2, 0).rechunk(chunk_shape)
         except (ImportError,UnknownFormatError) as e:
             import imageio.v3 as iio
             import numpy as np
@@ -80,7 +75,7 @@ def from_images(stack_dir, stack_files, stack_pattern, vol_file,
             arr = da.from_array(np.stack(imgs, axis=-1), chunks=chunk_shape)
 
     # --- Use stack-to-chunk to convert to OME-Zarr ---
-    chunk_shape = (64, 64, 64)
+    chunk_shape = (chunk_size,) * 3
     voxel_size_tuple = tuple(voxel_size) if len(voxel_size) == 3 else tuple(voxel_size) * 3
 
     try:
