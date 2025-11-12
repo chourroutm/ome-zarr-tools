@@ -6,7 +6,7 @@ import click
 import zarr
 
 try:
-    import ome_zarr_models.v05 as ome_models
+    import ome_zarr_models.v04 as ome_models
 except Exception:  # pragma: no cover - optional dependency
     ome_models = None
 
@@ -50,14 +50,23 @@ def fix_metadata(zarr_path: str):
     click.echo(f"Backed up root attributes to {backup_path}")
 
     # Show current ome metadata if present
-    existing_ome = attrs.get("ome") or {}
-    existing_multiscales = existing_ome.get("multiscales") if isinstance(existing_ome, dict) else None
+    existing_ome = attrs.get("ome") or None
+    if isinstance(existing_ome, dict):
+        existing_multiscales = existing_ome.get("multiscales")
+    else:
+        existing_multiscales = attrs.get("multiscales") or {}
 
     click.echo("\nCurrent OME metadata (root 'ome' attribute):")
     if existing_ome:
         click.echo(json.dumps(existing_ome, indent=2))
     else:
         click.echo("<no 'ome' attribute present>")
+    
+    click.echo("\nCurrent multiscale metadata (root 'multiscales' attribute):")
+    if existing_multiscales:
+        click.echo(json.dumps(existing_multiscales, indent=2))
+    else:
+        click.echo("<no 'multiscales' attribute present>")
 
     # Interactive prompts
     click.echo("\nEnter values (press Enter to keep shown default / current value).")
@@ -107,7 +116,7 @@ def fix_metadata(zarr_path: str):
     # Confirm changes
     click.echo("\nProposed metadata summary:")
     proposed = {
-        "version": "0.5",
+        "version": "0.4",
         "multiscales": [
             {
                 "name": name,
@@ -147,7 +156,7 @@ def fix_metadata(zarr_path: str):
     if ome_models is not None:
         try:
             ome_models.Image.from_zarr(group)
-            click.echo("Validation with ome-zarr-models v0.5 succeeded.")
+            click.echo("Validation with ome-zarr-models succeeded.")
         except Exception as exc:
             # restore backup if validation fails
             with backup_path.open() as f:
