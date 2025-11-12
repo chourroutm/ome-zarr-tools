@@ -1,3 +1,7 @@
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project.urls]
+Repository = "https://github.com/chourroutm/ome-zarr-tools"
+Issues = "https://github.com/chourroutm/ome-zarr-tools/issues"
