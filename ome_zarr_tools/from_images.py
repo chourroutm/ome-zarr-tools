@@ -6,6 +6,10 @@ from natsort import natsorted
 from pims.api import UnknownFormatError
 from pathlib import Path
 
+import sys
+
+sys.setrecursionlimit(10**6)
+
 @click.command()
 @click.option("--stack_dir", type=click.Path(exists=True), required=False,
               help="Path to directory with one type of files as slices (2D stack).")
@@ -35,11 +39,13 @@ def from_images(stack_dir, stack_pattern, vol_file,
     if stack_dir:
         sources = natsorted([os.path.join(stack_dir, fname) for fname in os.listdir(stack_dir)])
         click.echo(f"Using all {len(sources)} files in directory: {stack_dir}")
+        sources = Path(stack_dir) / "*"
     elif stack_pattern:
         sources = natsorted(glob.glob(stack_pattern))
         click.echo(f"Using pattern '{stack_pattern}' expanded to {len(sources)} files")
+        sources = Path(stack_pattern)
     elif vol_file:
-        sources = [vol_file]
+        sources = Path(vol_file)
         click.echo(f"Using 3D image file: {vol_file}")
     else:
         # raise click.UsageError("You must specify at least one of --stack_dir, --stack_files, --stack_pattern, or --vol_file.")
@@ -58,7 +64,6 @@ def from_images(stack_dir, stack_pattern, vol_file,
             import dask_image.imread
             arr = dask_image.imread.imread(vol_file).rechunk(chunk_shape)
         except (ImportError,UnknownFormatError) as e:
-        
             import imageio.v3 as iio
             import numpy as np
             arr = da.from_array(iio.imread(vol_file), chunks=chunk_shape)
@@ -67,7 +72,7 @@ def from_images(stack_dir, stack_pattern, vol_file,
         try:
             import dask_image.imread
             arr = dask_image.imread.imread(sources)
-            arr = arr.transpose(1, 2, 0).rechunk(chunk_shape)
+            arr = arr.transpose((2,1,0)).rechunk(chunk_shape)
         except (ImportError,UnknownFormatError) as e:
             import imageio.v3 as iio
             import numpy as np
