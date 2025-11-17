@@ -63,19 +63,23 @@ def from_images(stack_dir, stack_pattern, vol_file,
         try:
             import dask_image.imread
             arr = dask_image.imread.imread(vol_file).rechunk(chunk_shape)
-        except (ImportError,UnknownFormatError) as e:
-            import imageio.v3 as iio
-            import numpy as np
-            arr = da.from_array(iio.imread(vol_file), chunks=chunk_shape)
-    else:
-        # Use dask-image to read stack of images
-        try:
-            import dask_image.imread
-            arr = dask_image.imread.imread(sources)
             arr = arr.transpose((2,1,0)).rechunk(chunk_shape)
         except (ImportError,UnknownFormatError) as e:
             import imageio.v3 as iio
             import numpy as np
+            arr = da.from_array(iio.imread(vol_file), chunks=chunk_shape[::-1])
+            arr = arr.transpose((2,1,0))
+    else:
+        # Use dask-image to read stack of images
+        try:
+            import dask_image.imread
+            print("sol1")
+            arr = dask_image.imread.imread(sources)
+            arr = arr.transpose((2,1,0))
+        except (ImportError,UnknownFormatError) as e:
+            import imageio.v3 as iio
+            import numpy as np
+            print("sol2")
             imgs = [iio.imread(f) for f in sources]
             arr = da.from_array(np.stack(imgs, axis=-1), chunks=chunk_shape)
 
