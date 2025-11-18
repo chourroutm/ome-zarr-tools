@@ -73,13 +73,11 @@ def from_images(stack_dir, stack_pattern, vol_file,
         # Use dask-image to read stack of images
         try:
             import dask_image.imread
-            print("sol1")
             arr = dask_image.imread.imread(sources)
             arr = arr.transpose((2,1,0))
         except (ImportError,UnknownFormatError) as e:
             import imageio.v3 as iio
             import numpy as np
-            print("sol2")
             imgs = [iio.imread(f) for f in sources]
             arr = da.from_array(np.stack(imgs, axis=-1), chunks=chunk_shape)
 
