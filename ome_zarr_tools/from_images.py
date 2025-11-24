@@ -88,10 +88,17 @@ def from_images(stack_dir, stack_pattern, vol_file,
     try:
         from stack_to_chunk import MultiScaleGroup, memory_per_process
         from pydantic_zarr.v2 import ArraySpec
+        import numcodecs
     except ImportError:
         raise click.ClickException("stack-to-chunk is not installed. Please install it to use this feature.")
 
-    array_spec = ArraySpec.from_array(arr, chunks=chunk_shape)
+    array_spec = ArraySpec.from_array(arr,
+                                      chunks=chunk_shape,
+                                      fill_value=0,
+                                      compressor={
+                                        "id": "gzip",
+                                        "level": 5
+                                      })
 
     bytes_per_process = memory_per_process(arr, chunk_size=chunk_shape[0])
     print(f"Each process will use {bytes_per_process / 1e6:.1f} MB")
