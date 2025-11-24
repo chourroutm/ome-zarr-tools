@@ -88,7 +88,6 @@ def from_images(stack_dir, stack_pattern, vol_file,
     try:
         from stack_to_chunk import MultiScaleGroup, memory_per_process
         from pydantic_zarr.v2 import ArraySpec
-        import numcodecs
     except ImportError:
         raise click.ClickException("stack-to-chunk is not installed. Please install it to use this feature.")
 
