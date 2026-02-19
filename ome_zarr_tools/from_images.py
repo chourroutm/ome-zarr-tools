@@ -25,14 +25,12 @@ sys.setrecursionlimit(10**6)
               help="Number of downsampled levels (default: 0).")
 @click.option("--chunk_size", default=64, required=False,
               help="Chunk size (default: 64).")
-@click.option("--num_processes", default=1, required=False,
-              help="Number of processes (default: 1).")
 @click.argument("output_zarr", type=click.Path())
 def from_images(stack_dir, stack_pattern, vol_file,
-                voxel_size, voxel_size_unit, num_downsampling, chunk_size, num_processes, output_zarr):
+                voxel_size, voxel_size_unit, num_downsampling, chunk_size, output_zarr):
     """
     Convert images from a stack of 2D slices or a 3D image file to OME-Zarr format at OUTPUT_ZARR
-    using stack-to-chunk for correct chunking and metadata.
+    using bioio-ome-zarr for correct chunking and metadata.
     """
     # --- Find image sources ---
     sources = []
@@ -48,7 +46,6 @@ def from_images(stack_dir, stack_pattern, vol_file,
         sources = Path(vol_file)
         click.echo(f"Using 3D image file: {vol_file}")
     else:
-        # raise click.UsageError("You must specify at least one of --stack_dir, --stack_files, --stack_pattern, or --vol_file.")
         raise click.UsageError("You must specify at least one of --stack_dir, --stack_pattern, or --vol_file.")
 
     click.echo(f"Voxel size: {voxel_size}")
@@ -59,62 +56,44 @@ def from_images(stack_dir, stack_pattern, vol_file,
 
     # --- Build dask array from input ---
     if vol_file:
-        # Use dask-image for large 3D files; fallback to dask from numpy if not
+        # Use dask.array.image for large 3D files; fallback to imageio if not
         try:
-            import dask_image.imread
-            arr = dask_image.imread.imread(vol_file).rechunk(chunk_shape)
+            from dask.array.image import imread
+            arr = imread(vol_file).rechunk(chunk_shape)
             arr = arr.transpose((2,1,0)).rechunk(chunk_shape)
-        except (ImportError,UnknownFormatError) as e:
+        except (ImportError, UnknownFormatError) as e:
             import imageio.v3 as iio
             import numpy as np
             arr = da.from_array(iio.imread(vol_file), chunks=chunk_shape[::-1])
             arr = arr.transpose((2,1,0))
     else:
-        # Use dask-image to read stack of images
+        # Use dask.array.image to read stack of images
         try:
-            import dask_image.imread
-            arr = dask_image.imread.imread(sources)
+            from dask.array.image import imread
+            arr = imread(sources)
             arr = arr.transpose((2,1,0))
-        except (ImportError,UnknownFormatError) as e:
+        except (ImportError, UnknownFormatError) as e:
             import imageio.v3 as iio
             import numpy as np
             imgs = [iio.imread(f) for f in sources]
             arr = da.from_array(np.stack(imgs, axis=-1), chunks=chunk_shape)
 
-    # --- Use stack-to-chunk to convert to OME-Zarr ---
-    chunk_shape = (chunk_size,) * 3
+    # --- Use bioio-ome-zarr to convert to OME-Zarr ---
+    try:
+        from bioio_ome_zarr import OmeZarrWriter
+    except ImportError:
+        raise click.ClickException("bioio-ome-zarr is not installed. Please install it to use this feature.")
+
     voxel_size_tuple = tuple(voxel_size) if len(voxel_size) == 3 else tuple(voxel_size) * 3
 
-    try:
-        from stack_to_chunk import MultiScaleGroup, memory_per_process
-        from pydantic_zarr.v2 import ArraySpec
-    except ImportError:
-        raise click.ClickException("stack-to-chunk is not installed. Please install it to use this feature.")
-
-    array_spec = ArraySpec.from_array(arr,
-                                      chunks=chunk_shape,
-                                      fill_value=0,
-                                      compressor={
-                                        "id": "gzip",
-                                        "level": 5
-                                      })
-
-    bytes_per_process = memory_per_process(arr, chunk_size=chunk_shape[0])
-    print(f"Each process will use {bytes_per_process / 1e6:.1f} MB")
-
-    group = MultiScaleGroup(
-        Path(output_zarr),
-        name="my_group",
-        spatial_unit=voxel_size_unit,
+    with OmeZarrWriter(
+        str(output_zarr),
+        array=arr,
         voxel_size=voxel_size_tuple,
-        array_spec=array_spec,
-    )
-    with click.progressbar(range(1+num_downsampling),
-                       label='Generating multi-scale OME-Zarr dataset...') as bar:
-        for level_id in bar:
-            if level_id == 0:
-                group.add_full_res_data(arr, n_processes=num_processes)
-            else:
-                group.add_downsample_level(level_id, n_processes=num_processes)
+        voxel_size_unit=voxel_size_unit,
+        chunk_size=(chunk_size, chunk_size, chunk_size),
+        number_of_downsampling_levels=num_downsampling,
+    ) as writer:
+        writer.write()
 
     click.echo(f"Saved OME-Zarr at {output_zarr} with shape {arr.shape} and {num_downsampling} downsampled levels")
