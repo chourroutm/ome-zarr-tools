@@ -4,7 +4,7 @@ import glob
 import dask.array as da
 from natsort import natsorted
 from pims.api import UnknownFormatError
-from pathlib import Path
+from cloudpathlib import AnyPath as Path
 
 import sys
 
@@ -52,11 +52,10 @@ def from_images(stack_dir, stack_pattern, vol_file,
     click.echo(f"Voxel size unit: {voxel_size_unit}")
     click.echo(f"Converting to OME-Zarr at {output_zarr}")
 
-    chunk_shape = (chunk_size, chunk_size, 1)
-
     # --- Build dask array from input ---
     if vol_file:
         # Use dask.array.image for large 3D files; fallback to imageio if not
+        chunk_shape = (chunk_size, ) * 3
         try:
             from dask.array.image import imread
             arr = imread(vol_file).rechunk(chunk_shape)
@@ -68,6 +67,7 @@ def from_images(stack_dir, stack_pattern, vol_file,
             arr = arr.transpose((2,1,0))
     else:
         # Use dask.array.image to read stack of images
+        chunk_shape = (chunk_size, chunk_size, 1)
         try:
             from dask.array.image import imread
             arr = imread(sources)
