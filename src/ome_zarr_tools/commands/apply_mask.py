@@ -10,6 +10,7 @@ import zarr
 
 from ome_zarr_tools.core.backup import backup_attrs
 from ome_zarr_tools.core.errors import CliError
+from ome_zarr_tools.core.zarr_path import ZarrPathParamType
 
 
 def upsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
@@ -38,13 +39,13 @@ def downsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
 @click.option(
     "--volume",
     required=True,
-    type=click.Path(exists=True, file_okay=False),
+    type=ZarrPathParamType(exists=True, file_okay=False),
     help="Path to OME-Zarr volume.",
 )
 @click.option(
     "--mask",
     required=True,
-    type=click.Path(exists=True, file_okay=False),
+    type=ZarrPathParamType(exists=True, file_okay=False),
     help="Path to OME-Zarr mask.",
 )
 @click.option(

@@ -42,3 +42,32 @@ def validate(group: zarr.Group) -> tuple[bool, str | None]:
     except Exception as exc:
         return False, str(exc)
     return True, None
+
+
+def _scale_of(dataset: dict[str, Any]) -> list[float]:
+    scale_transform = next(t for t in dataset["coordinateTransformations"] if t["type"] == "scale")
+    return list(scale_transform["scale"])
+
+
+def add_half_pixel_translations(datasets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Insert a ``translation`` transform after each dataset's ``scale``, per axis:
+
+        translation_N = (scale_N - scale_0) / 2
+
+    The documented (non-normative -- a MUST/SHOULD isn't made of the value,
+    only of translation coming after scale when present) convention for
+    classical-binning downsampling, straight from the spec: "translations
+    should be (pixel-size-at-resolution-N - pixel-size-at-resolution-0) / 2
+    for correct multi-scale alignment" (ngff-spec index.md, § Multiscale
+    coordinateTransformations). Anchors level 0 at translation 0 and aligns
+    every coarser level to the same physical grid.
+    """
+    scale_0 = _scale_of(datasets[0])
+    updated = []
+    for dataset in datasets:
+        transforms = [t for t in dataset["coordinateTransformations"] if t["type"] != "translation"]
+        scale_n = _scale_of(dataset)
+        translation = [(sn - s0) / 2 for sn, s0 in zip(scale_n, scale_0, strict=True)]
+        transforms.append({"type": "translation", "translation": translation})
+        updated.append({**dataset, "coordinateTransformations": transforms})
+    return updated

@@ -10,11 +10,12 @@ import numpy as np
 import zarr
 
 from ome_zarr_tools.core.errors import CliError
+from ome_zarr_tools.core.zarr_path import ZarrPathParamType
 from ome_zarr_tools.io.ome_metadata import read_multiscales
 
 
 @click.command()
-@click.argument("zarr_path", type=click.Path(exists=True))
+@click.argument("zarr_path", type=ZarrPathParamType(exists=True))
 @click.option(
     "--corner",
     nargs=3,
@@ -76,7 +77,10 @@ def extract(
     elif scale and not mag:
         mag = 1.0 / scale
 
-    group = zarr.open_group(zarr_path, mode="r")
+    try:
+        group = zarr.open_group(zarr_path, mode="r")
+    except Exception as exc:
+        raise CliError(f"No Zarr group found at {zarr_path}. Details: {exc}") from exc
     multiscales = read_multiscales(group)
     if not multiscales:
         raise CliError(f"No multiscales metadata found in {zarr_path}.")

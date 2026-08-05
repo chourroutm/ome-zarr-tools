@@ -7,7 +7,11 @@ data-model.md § Command Session.
 
 from __future__ import annotations
 
+import sys
+
 import click
+
+from ome_zarr_tools.core.errors import CliError
 
 
 def _prompt_tokens(param: click.Parameter) -> list[str]:
@@ -51,15 +55,12 @@ def _prompt_tokens(param: click.Parameter) -> list[str]:
     return [flag, raw] if raw != "" else []
 
 
-def _run_wizard(command: click.Command) -> None:
-    click.echo(f"\n--- {command.name} ---")
-    if command.help:
-        click.echo(command.help.strip().splitlines()[0])
+def _confirm_and_run(command: click.Command, tokens: list[str]) -> None:
+    """Show the equivalent direct-CLI invocation, confirm, then run it.
 
-    tokens: list[str] = []
-    for param in command.params:
-        tokens.extend(_prompt_tokens(param))
-
+    Shared by the prompt-based wizard and the Textual TUI (``interactive --tui``)
+    so both give the identical no-side-effects-before-confirmation guarantee.
+    """
     invocation = f"ome-zarr-tools {command.name} {' '.join(tokens)}".strip()
     click.echo(f"\nEquivalent command:\n  {invocation}")
 
@@ -70,16 +71,29 @@ def _run_wizard(command: click.Command) -> None:
     command.main(args=tokens, prog_name=f"ome-zarr-tools {command.name}", standalone_mode=False)
 
 
-@click.command(name="interactive")
-@click.pass_context
-def interactive(ctx: click.Context) -> None:
-    """Choose a command from a menu, then answer prompts to run it."""
+def _run_wizard(command: click.Command) -> None:
+    click.echo(f"\n--- {command.name} ---")
+    if command.help:
+        click.echo(command.help.strip().splitlines()[0])
+
+    tokens: list[str] = []
+    for param in command.params:
+        tokens.extend(_prompt_tokens(param))
+
+    _confirm_and_run(command, tokens)
+
+
+def _sibling_commands(ctx: click.Context) -> dict[str, click.Command]:
+    """The other commands registered on the parent group, excluding `interactive` itself."""
     group = ctx.parent.command if ctx.parent is not None else ctx.command
-    choices = {
+    return {
         name: cmd
         for name, cmd in group.commands.items()  # type: ignore[attr-defined]
         if name != "interactive"
     }
+
+
+def _run_prompt_menu(choices: dict[str, click.Command]) -> None:
     names = sorted(choices)
 
     click.echo("Available commands:")
@@ -93,3 +107,33 @@ def interactive(ctx: click.Context) -> None:
     )
     selected_name = names[int(selection) - 1] if selection.isdigit() else selection
     _run_wizard(choices[selected_name])
+
+
+def _run_tui(choices: dict[str, click.Command]) -> None:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise CliError(
+            "--tui requires an interactive terminal (stdin/stdout must be a tty); "
+            "run `interactive` without --tui instead."
+        )
+
+    from ome_zarr_tools.tui.app import InteractiveTUIApp
+
+    app = InteractiveTUIApp(choices)
+    app.run()
+
+
+@click.command(name="interactive")
+@click.option(
+    "--tui",
+    "use_tui",
+    is_flag=True,
+    help="Use the full-screen Textual interface instead of line-by-line prompts.",
+)
+@click.pass_context
+def interactive(ctx: click.Context, use_tui: bool) -> None:
+    """Choose a command from a menu, then answer prompts to run it."""
+    choices = _sibling_commands(ctx)
+    if use_tui:
+        _run_tui(choices)
+    else:
+        _run_prompt_menu(choices)

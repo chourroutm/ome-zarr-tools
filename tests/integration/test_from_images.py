@@ -29,8 +29,22 @@ def test_from_images_success(tmp_path, image_stack_dir):
     group = zarr.open_group(str(out), mode="r")
     assert group["0"].shape == (8, 32, 32)
     assert group["1"].shape == (4, 16, 16)
-    scale = group.attrs["multiscales"][0]["datasets"][0]["coordinateTransformations"][0]["scale"]
-    assert scale == [1.0, 1.0, 2.0]
+    datasets = group.attrs["multiscales"][0]["datasets"]
+    scale_0, translation_0 = (
+        datasets[0]["coordinateTransformations"][0]["scale"],
+        datasets[0]["coordinateTransformations"][1]["translation"],
+    )
+    scale_1, translation_1 = (
+        datasets[1]["coordinateTransformations"][0]["scale"],
+        datasets[1]["coordinateTransformations"][1]["translation"],
+    )
+    assert scale_0 == [1.0, 1.0, 2.0]
+    assert scale_1 == [2.0, 2.0, 4.0]
+    # translation_N = (scale_N - scale_0) / 2 (ngff-spec's documented multi-scale
+    # alignment convention for classical-binning downsampling): level 0 is the
+    # anchor (translation 0), coarser levels shift to stay aligned to it.
+    assert translation_0 == [0.0, 0.0, 0.0]
+    assert translation_1 == [0.5, 0.5, 1.0]
 
 
 def test_from_images_failure_conflicting_inputs(tmp_path, image_stack_dir):

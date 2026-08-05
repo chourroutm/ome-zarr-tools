@@ -8,6 +8,7 @@ import zarr
 
 from ome_zarr_tools.core.backup import backup_attrs, restore_attrs
 from ome_zarr_tools.core.errors import CliError
+from ome_zarr_tools.core.zarr_path import ZarrPathParamType
 from ome_zarr_tools.io.ome_metadata import read_multiscales, validate
 
 
@@ -18,8 +19,62 @@ def _parse_tuple_input(value: str, length: int) -> tuple[float, ...]:
     return tuple(float(p) for p in parts)
 
 
+def build_proposed_multiscales(
+    name: str,
+    spatial_unit: str,
+    voxel_size: tuple[float, ...],
+    axis_names: list[str],
+    dataset_paths: list[str],
+) -> list[dict]:
+    """Build the proposed ``multiscales`` metadata from these field values.
+
+    Pure function, extracted so both this command's own prompt flow and the
+    TUI's diff/rich-view preview (tui/screens/metadata_screen.py) build the
+    exact same proposed metadata from the exact same inputs -- no duplicated
+    logic to drift out of sync.
+    """
+    return [
+        {
+            "version": "0.4",
+            "name": name,
+            "axes": [
+                {"name": axis_names[0], "type": "space", "unit": spatial_unit},
+                {"name": axis_names[1], "type": "space", "unit": spatial_unit},
+                {"name": axis_names[2], "type": "space", "unit": spatial_unit},
+            ],
+            "datasets": [
+                {
+                    "path": dataset_path,
+                    "coordinateTransformations": [
+                        {"type": "scale", "scale": [float(v) * (2**i) for v in voxel_size]},
+                    ],
+                }
+                for i, dataset_path in enumerate(dataset_paths)
+            ],
+        }
+    ]
+
+
+def write_metadata(path: Path, group: zarr.Group, proposed_multiscales: list[dict]) -> Path:
+    """Back up, write, and validate ``proposed_multiscales`` onto ``group``.
+
+    Raises ``CliError`` (after restoring the backup) if the result doesn't
+    validate. Extracted so the TUI's Run action (tui/screens/metadata_screen.py)
+    can call this directly -- bypassing the interactive ``click.confirm`` below,
+    which would otherwise block on stdin from a worker thread -- while the
+    prompt-based command body keeps its own confirm step unchanged.
+    """
+    backup_path = backup_attrs(path, group)
+    group.attrs["multiscales"] = proposed_multiscales
+    is_valid, error = validate(group)
+    if not is_valid:
+        restore_attrs(group, backup_path)
+        raise CliError(f"Validation failed; restored previous metadata. Details: {error}")
+    return backup_path
+
+
 @click.command(name="fix_metadata")
-@click.argument("zarr_path", type=click.Path(exists=True))
+@click.argument("zarr_path", type=ZarrPathParamType(exists=True))
 def fix_metadata(zarr_path: str) -> None:
     """Interactively populate/correct an OME-Zarr dataset's root metadata.
 
@@ -79,26 +134,9 @@ def fix_metadata(zarr_path: str) -> None:
 
     dataset_paths = [d["path"] for d in multiscales[0]["datasets"]] if multiscales else ["0"]
 
-    proposed_multiscales = [
-        {
-            "version": "0.4",
-            "name": name,
-            "axes": [
-                {"name": axis_names[0], "type": "space", "unit": spatial_unit},
-                {"name": axis_names[1], "type": "space", "unit": spatial_unit},
-                {"name": axis_names[2], "type": "space", "unit": spatial_unit},
-            ],
-            "datasets": [
-                {
-                    "path": dataset_path,
-                    "coordinateTransformations": [
-                        {"type": "scale", "scale": [float(v) * (2**i) for v in voxel_size]},
-                    ],
-                }
-                for i, dataset_path in enumerate(dataset_paths)
-            ],
-        }
-    ]
+    proposed_multiscales = build_proposed_multiscales(
+        name, spatial_unit, voxel_size, axis_names, dataset_paths
+    )
 
     click.echo("\nProposed metadata:")
     click.echo(json.dumps(proposed_multiscales, indent=2))
@@ -107,14 +145,6 @@ def fix_metadata(zarr_path: str) -> None:
         click.echo("Aborted. No changes were written.")
         return
 
-    backup_path = backup_attrs(path, group)
+    backup_path = write_metadata(path, group, proposed_multiscales)
     click.echo(f"Backed up existing root attributes to {backup_path}")
-
-    group.attrs["multiscales"] = proposed_multiscales
-
-    is_valid, error = validate(group)
-    if not is_valid:
-        restore_attrs(group, backup_path)
-        raise CliError(f"Validation failed; restored previous metadata. Details: {error}")
-
     click.echo("Metadata successfully written and validated.")

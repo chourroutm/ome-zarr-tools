@@ -1,6 +1,7 @@
 import hashlib
 import json
 
+import zarr
 from click.testing import CliRunner
 
 from ome_zarr_tools.commands.inspect import inspect
@@ -42,3 +43,35 @@ def test_inspect_text_output_lists_levels(sample_ome_zarr):
     assert "Level 0:" in result.output
     assert "Level 1:" in result.output
     assert "Total stored size" in result.output
+
+
+def test_inspect_reports_a_clean_error_for_a_dataset_with_no_zarr_metadata(tmp_path):
+    """No .zattrs/.zgroup/zarr.json anywhere (incomplete download) must not leak a traceback."""
+    broken = tmp_path / "broken.ome.zarr"
+    (broken / "0" / "c").mkdir(parents=True)
+
+    runner = CliRunner()
+    result = runner.invoke(inspect, [str(broken)])
+    assert result.exit_code != 0
+    assert "Traceback" not in result.output
+    assert "No Zarr group found" in result.output
+
+
+def test_inspect_degrades_gracefully_when_stored_bytes_is_unavailable(monkeypatch, sample_ome_zarr):
+    """A store that denies listing (e.g. an anonymous-read-only remote bucket) must not crash."""
+
+    def _raise_permission_error(self):
+        raise PermissionError("listing denied")
+
+    monkeypatch.setattr(zarr.Array, "nbytes_stored", _raise_permission_error)
+
+    runner = CliRunner()
+    result = runner.invoke(inspect, [str(sample_ome_zarr), "--format", "json"])
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["total_stored_bytes"] is None
+    assert all(level["stored_bytes"] is None for level in report["levels"])
+
+    text_result = runner.invoke(inspect, [str(sample_ome_zarr)])
+    assert text_result.exit_code == 0, text_result.output
+    assert "unknown (store denied listing)" in text_result.output

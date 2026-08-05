@@ -10,11 +10,21 @@ pip install -e ".[dev]"
 
 This installs the pinned runtime dependencies plus `pytest`, `ruff`, and `mypy`. See `pyproject.toml` for exact version constraints.
 
+To work with datasets on Google Cloud Storage or S3 (`gs://...`, `s3://...` paths), also install the `remote` extra:
+
+```bash
+pip install -e ".[remote]"
+```
+
+This adds `gcsfs`/`s3fs` (via `zarr[remote]`). Without it, remote paths are still accepted by the CLI but fail with a clear error when the command tries to open the store.
+
 ## Usage
 
 ```bash
 ome-zarr-tools [subcommand] [OPTIONS]
 ```
+
+Any `ZARR_PATH`/`--volume`/`--mask` argument accepts either a local path or a remote store URL (`gs://...`, `s3://...`) — the `remote` extra above must be installed for the URL to actually open. `inspect`/`extract` are read-only and work well against remote data; `fix_metadata`/`migrate`/`apply_mask` write to the store, and remote write support depends on the underlying filesystem/credentials being writable — this hasn't been broadly exercised against remote stores yet.
 
 ### Subcommands
 
@@ -31,11 +41,13 @@ ome-zarr-tools [subcommand] [OPTIONS]
 
 - **`config`** — Show, set, or reset user- or project-scoped configuration (`config show|set|reset`).
 
-- **`interactive`** — Open a menu of every other subcommand; selecting one launches a step-by-step wizard for its options, then runs it (or shows the equivalent direct command if cancelled).
+- **`interactive`** — Open a menu of every other subcommand; selecting one launches a step-by-step wizard for its options, then runs it (or shows the equivalent direct command if cancelled). Add `--tui` for a full-screen interface instead: a menu plus an editable form (review and revise any field before submitting, not strictly one-at-a-time), with live autocomplete on any path field. `--tui` requires an attached interactive terminal; without one, it exits with a clear message rather than the default prompt-based flow.
+
+  There's no button or confirmation dialog in `--tui` — the equivalent CLI invocation is always shown live above the footer, and the footer itself lists the shortcuts: `F5` Run, `F6` Copy, `F7` Copy & exit, `F8` toggle the Command Log. Once Run is pressed, a live status indicator tracks the command (a progress bar when the remaining work has a countable total, otherwise an animated sparkline), and the log (hidden by default) captures the same output a direct CLI run would print. A few commands get their own richer screen instead of the plain field form: `fix_metadata`/`migrate` always show a diff of current vs. proposed metadata plus a structured view (directly editable for `fix_metadata`); `inspect` shows a scrollable per-level JSON panel and a structure-summary panel, switchable with `F9`; `config` shows a user/project scope picker, the effective values vs. the tool's built-in defaults, and an editable JSON editor for the underlying config file.
 
 - **`migrate`** — Upgrade an OME-Zarr dataset to a target OME-NGFF specification version (`--target_version`, default `0.4`). Since the specification couples metadata version to Zarr storage format (0.4 → Zarr v2, 0.5+ → Zarr v3), migrating also converts storage as needed.
 
-- **`inspect`** — Report, per resolution level and dataset-wide, shape, dtype, chunk shape, shard shape, on-disk (stored) size, and logical (uncompressed) size. Read-only. Options: `--format text|json`.
+- **`inspect`** — Report, per resolution level and dataset-wide, shape, dtype, chunk shape, shard shape, on-disk (stored) size, and logical (uncompressed) size. Read-only. Options: `--format text|json`. On-disk size requires listing the store's chunk keys; against a remote store that allows anonymous object reads but not bucket listing, it's reported as unavailable rather than failing the whole command.
 
 Run `ome-zarr-tools <subcommand> --help` for full option details.
 

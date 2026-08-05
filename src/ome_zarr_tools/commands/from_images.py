@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import click
+import zarr
 
 from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.io.images import read_stack, read_volume
+from ome_zarr_tools.io.ome_metadata import add_half_pixel_translations
 
 
 def _level_shapes(shape: tuple[int, ...], num_downsampling: int) -> list[tuple[int, ...]]:
@@ -119,6 +122,12 @@ def from_images(
     )
     writer.initialize()
     writer.write_full_volume(arr)
+
+    group = zarr.open_group(str(output_zarr), mode="r+")
+    attrs = dict(group.attrs)
+    multiscales = cast("list[dict[str, Any]]", attrs["multiscales"])
+    multiscales[0]["datasets"] = add_half_pixel_translations(multiscales[0]["datasets"])
+    group.attrs.put(attrs)
 
     click.echo(
         f"Saved OME-Zarr at {output_zarr} with shape {arr.shape} "

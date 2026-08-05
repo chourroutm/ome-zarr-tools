@@ -1,0 +1,188 @@
+"""`config` screen: scope picker, current-vs-defaults view, editable JSON (FR-017).
+
+Reuses ``commands/config.py``'s existing ``read_config``/``write_config``/
+``target_config_path`` (data-model.md § Config Editor) rather than reformatting
+config-file logic here. Save validates JSON syntax (blocking, edit preserved,
+per the Edge Cases table) then writes the whole parsed object directly --
+`config set`'s key=value CLI form can't losslessly round-trip nested JSON, so
+this bypasses ``config.main()`` the same way `fix_metadata`/`migrate` bypass
+their commands for their own extracted write functions (research.md).
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import click
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Input, Label, Select, TextArea
+
+from ome_zarr_tools.commands.config import read_config, target_config_path, write_config
+from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
+from ome_zarr_tools.tui.status import StatusPanel
+
+
+def collect_default_values() -> dict[str, object]:
+    """The tool's built-in option defaults, gathered for comparison (not a config-file tier)."""
+    from ome_zarr_tools.cli import cli
+
+    defaults: dict[str, object] = {}
+    for name, command in cli.commands.items():
+        if name in ("config", "interactive"):
+            continue
+        for param in command.params:
+            if not isinstance(param, click.Option) or param.required or param.default is None:
+                continue
+            try:
+                json.dumps(param.default)
+            except TypeError:
+                continue  # e.g. click's internal sentinel for unresolved multi-value defaults
+            defaults.setdefault(param.name, param.default)
+    return defaults
+
+
+class ConfigScreen(Screen[None]):
+    BINDINGS = [
+        Binding("f5", "run", "Save"),
+        Binding("f6", "copy", "Copy"),
+        Binding("f7", "copy_and_exit", "Copy & exit"),
+        Binding("f8", "toggle_log", "Log"),
+        Binding("escape", "back", "Back to menu"),
+        Binding("ctrl+c", "cancel", "Cancel"),
+    ]
+
+    DEFAULT_CSS = """
+    #bottom-bar {
+        dock: bottom;
+        height: auto;
+    }
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._scope_select: Select[str] = Select(
+            [("user", "user"), ("project", "project")],
+            value="user",
+            allow_blank=False,
+            id="field-scope",
+        )
+        self._project_dir_label = Label("Project directory")
+        self._project_dir_input = Input(placeholder=str(Path.cwd()), id="field-project_dir")
+        self._current_view = TextArea("", language="json", read_only=True, id="current-view")
+        self._defaults_view = TextArea(
+            json.dumps(collect_default_values(), indent=2),
+            language="json",
+            read_only=True,
+            id="defaults-view",
+        )
+        self._editor = TextArea("{}", language="json", id="editor")
+        self._log_lines: list[str] = []
+        self._status_panel = StatusPanel()
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with VerticalScroll():
+            yield Label("Scope")
+            yield self._scope_select
+            yield self._project_dir_label
+            yield self._project_dir_input
+            yield Label("Current preferences (this scope)")
+            yield self._current_view
+            yield Label("Built-in defaults (for comparison)")
+            yield self._defaults_view
+            yield Label("Editable config JSON")
+            yield self._editor
+        with Vertical(id="bottom-bar"):
+            yield self._status_panel
+            yield Footer()
+
+    def on_mount(self) -> None:
+        self._refresh_scope_visibility()
+        self._load_current()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        self._refresh_scope_visibility()
+        self._load_current()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._load_current()
+
+    def _refresh_scope_visibility(self) -> None:
+        is_project = self._scope_select.value == "project"
+        self._project_dir_label.display = is_project
+        self._project_dir_input.display = is_project
+
+    def _target_path(self) -> Path:
+        if self._scope_select.value == "user":
+            return target_config_path(True, None)
+        project_dir = self._project_dir_input.value.strip() or str(Path.cwd())
+        return target_config_path(False, project_dir)
+
+    def _load_current(self) -> None:
+        cfg = read_config(self._target_path())
+        text = json.dumps(cfg, indent=2) if cfg else "{}"
+        self._current_view.text = text
+        self._editor.text = text
+
+    def _invocation_text(self) -> str:
+        if self._scope_select.value == "user":
+            return "ome-zarr-tools config set --user <key=value ...>"
+        project_dir = self._project_dir_input.value.strip() or str(Path.cwd())
+        return f"ome-zarr-tools config set --project {project_dir} <key=value ...>"
+
+    def action_run(self) -> None:
+        try:
+            parsed = json.loads(self._editor.text)
+        except json.JSONDecodeError as exc:
+            self.notify(f"Invalid JSON: {exc}", severity="error")
+            return
+        if not isinstance(parsed, dict):
+            self.notify("Config must be a JSON object.", severity="error")
+            return
+
+        path = self._target_path()
+
+        def _work() -> None:
+            write_config(path, parsed)
+
+        self._status_panel.start()
+        run_in_background(
+            self.app,
+            _work,
+            self._on_execution_done,
+            on_progress=self._status_panel.update_progress,
+            on_log=self._status_panel.append_log,
+        )
+
+    def _on_execution_done(self, result: ExecutionResult) -> None:
+        self._status_panel.stop()
+        if result.succeeded:
+            self._current_view.text = self._editor.text
+            self._log_lines.append("config succeeded.")
+            self.notify("config succeeded.")
+        else:
+            self._log_lines.append(f"config failed: {result.error}")
+            self.notify(f"config failed: {result.error}", severity="error")
+
+    def action_copy(self) -> None:
+        invocation = self._invocation_text()
+        self.app.copy_to_clipboard(invocation)
+        self._log_lines.append(f"Copied: {invocation}")
+        self.notify("Copied to clipboard (and logged).")
+
+    def action_copy_and_exit(self) -> None:
+        self.action_copy()
+        self.app.exit(result=None)
+
+    def action_toggle_log(self) -> None:
+        self._status_panel.toggle_log()
+
+    def action_back(self) -> None:
+        self.app.pop_screen()
+
+    def action_cancel(self) -> None:
+        self.app.exit(result=None)

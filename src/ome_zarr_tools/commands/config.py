@@ -13,7 +13,7 @@ USER_CONFIG_REL = Path(".local") / "ome-zarr-tools.config"
 PROJECT_CONFIG_NAME = "ome-zarr-tools.config"
 
 
-def _read_config(path: Path) -> dict[str, Any]:
+def read_config(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
@@ -22,12 +22,12 @@ def _read_config(path: Path) -> dict[str, Any]:
         raise CliError(f"Failed to read config at {path} (invalid JSON): {exc}") from exc
 
 
-def _write_config(path: Path, data: dict[str, Any]) -> None:
+def write_config(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
-def _target_path(user: bool, project: str | None) -> Path:
+def target_config_path(user: bool, project: str | None) -> Path:
     if user:
         return Path.home() / USER_CONFIG_REL
     assert project is not None
@@ -77,8 +77,8 @@ def show(user: bool, project: str | None) -> None:
     user_path = home / USER_CONFIG_REL
     project_path = (Path(project).resolve() if project else Path.cwd()) / PROJECT_CONFIG_NAME
 
-    user_cfg = _read_config(user_path)
-    proj_cfg = _read_config(project_path)
+    user_cfg = read_config(user_path)
+    proj_cfg = read_config(project_path)
 
     def _exists_note(p: Path) -> str:
         return "(exists)" if p.exists() else "(not found)"
@@ -129,13 +129,13 @@ def set_config(user: bool, project: str | None, pairs: Iterable[str]) -> None:
     if not (user or project):
         raise CliError("Pass either --user or --project to select which config to modify.")
 
-    target_path = _target_path(user, project)
-    cfg = _read_config(target_path)
+    target_path = target_config_path(user, project)
+    cfg = read_config(target_path)
     for pair in pairs:
         key, value = _parse_kv_pair(pair)
         cfg[key] = value
         click.echo(f"Set {key} = {value!r} in {target_path}")
-    _write_config(target_path, cfg)
+    write_config(target_path, cfg)
     click.echo(f"Wrote config to {target_path}")
 
 
@@ -155,7 +155,7 @@ def reset_config(user: bool, project: str | None, remove_all: bool, keys: Iterab
     if not (user or project):
         raise CliError("Pass either --user or --project to select which config to modify.")
 
-    target_path = _target_path(user, project)
+    target_path = target_config_path(user, project)
     if not target_path.exists():
         click.echo(f"No config file at {target_path} to reset.")
         return
@@ -168,9 +168,9 @@ def reset_config(user: bool, project: str | None, remove_all: bool, keys: Iterab
     if not keys:
         raise CliError("Provide one or more keys to reset, or use --all to remove the file.")
 
-    cfg = _read_config(target_path)
+    cfg = read_config(target_path)
     removed = [k for k in keys if k in cfg]
     for k in removed:
         cfg.pop(k, None)
-    _write_config(target_path, cfg)
+    write_config(target_path, cfg)
     click.echo(f"Removed keys {removed} from {target_path}")

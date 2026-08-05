@@ -35,6 +35,33 @@ def test_interactive_runs_from_images(tmp_path, image_stack_dir):
     assert group["0"].shape[0] == 8  # 8 slices in image_stack_dir
 
 
+def test_interactive_prompt_flow_unchanged_regression(tmp_path):
+    """Locks in the exact menu/prompt text for `interactive` (no flag).
+
+    Added alongside 002-textual-tui-interactive's --tui flag and the
+    _confirm_and_run extraction, to guard FR-001/SC-001: the prompt-based
+    flow must not change in any observable way.
+    """
+    runner = CliRunner()
+    result = runner.invoke(cli, ["interactive"], input="2\nn\n")
+    assert result.exit_code == 0, result.output
+    assert (
+        "Available commands:\n"
+        "  1. apply_mask\n"
+        "  2. config\n"
+        "  3. extract\n"
+        "  4. fix_metadata\n"
+        "  5. from_images\n"
+        "  6. inspect\n"
+        "  7. migrate\n"
+    ) in result.output
+    assert "Select a command:" in result.output
+    assert "\n--- config ---\n" in result.output
+    assert "\nEquivalent command:\n  ome-zarr-tools config\n" in result.output
+    assert "Run this now? [Y/n]:" in result.output
+    assert "Cancelled. No changes were made." in result.output
+
+
 def test_interactive_cancel_leaves_no_side_effects(tmp_path, image_stack_dir):
     out = tmp_path / "out.zarr"
     runner = CliRunner()
