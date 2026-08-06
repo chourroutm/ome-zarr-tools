@@ -26,7 +26,9 @@ async def test_select_edit_revisit_and_run_executes(
     """SC-003: editing an earlier field after moving on works, without restarting the form.
 
     Also covers FR-005: pressing Run (F5) executes immediately, no confirmation
-    dialog -- the invocation was already visible in the form.
+    dialog -- the equivalent invocation is always computable via
+    ``_invocation_text()``, even though (per spec 003 US2) no live preview of
+    it is rendered on screen.
     """
     monkeypatch.chdir(tmp_path)
 
@@ -38,12 +40,15 @@ async def test_select_edit_revisit_and_run_executes(
         await pilot.press("enter")
         await pilot.pause()
 
+        assert len(app.screen.query("#invocation")) == 0  # spec 003 US2: no preview panel
+
         volume_field = app.screen.query_one("#field-volume", Input)
         volume_field.focus()
         await pilot.press(*"first-attempt.zarr")
         await pilot.pause()
         assert volume_field.value == "first-attempt.zarr"
         assert "first-attempt.zarr" in app.screen._invocation_text()
+        assert len(app.screen.query("#invocation")) == 0  # still no preview panel after edits
 
         # Move on to the next field, then come back and revise the first one --
         # this is exactly what the strictly-sequential prompt-based flow can't do.
@@ -142,7 +147,38 @@ async def test_copy_does_not_run_and_copy_and_exit_closes_the_app(monkeypatch, t
         await pilot.press("f7")  # Copy & exit
         await pilot.pause()
 
-    assert app.return_value is None
+
+async def test_command_form_screen_copy_matches_invocation_text_with_no_visible_preview(
+    monkeypatch, tmp_path: Path
+):
+    """Spec 003 US2: from_images/extract/apply_mask share CommandFormScreen, which no
+    longer renders a live invocation preview -- Copy must still produce the exact,
+    correct invocation for the current field values.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    app = InteractiveTUIApp(COMMANDS)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        ol = app.screen.query_one(OptionList)
+        ol.highlighted = _menu_index("apply_mask")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert len(app.screen.query("#invocation")) == 0
+
+        volume_field = app.screen.query_one("#field-volume", Input)
+        volume_field.focus()
+        await pilot.press(*"vol.zarr")
+        await pilot.pause()
+
+        form_screen = app.screen
+        expected = form_screen._invocation_text()
+        await pilot.press("f6")  # Copy
+        await pilot.pause()
+        assert app._clipboard == expected
+        assert "vol.zarr" in app._clipboard
+        assert len(app.screen.query("#invocation")) == 0
 
 
 async def test_tui_tokens_match_prompt_wizard_for_equivalent_answers(monkeypatch, tmp_path: Path):

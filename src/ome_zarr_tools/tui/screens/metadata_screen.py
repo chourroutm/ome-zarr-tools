@@ -16,7 +16,6 @@ from pathlib import Path
 import click
 import zarr
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Label, RichLog, TextArea
@@ -31,18 +30,12 @@ from ome_zarr_tools.io.ome_metadata import detect_version, read_multiscales
 from ome_zarr_tools.tui.diff import render_diff
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
 from ome_zarr_tools.tui.fields import SafePathAutoComplete
+from ome_zarr_tools.tui.shortcuts import shared_bindings
 from ome_zarr_tools.tui.status import StatusPanel
 
 
 class _BaseMetadataScreen(Screen[None]):
-    BINDINGS = [
-        Binding("f5", "run", "Run"),
-        Binding("f6", "copy", "Copy"),
-        Binding("f7", "copy_and_exit", "Copy & exit"),
-        Binding("f8", "toggle_log", "Log"),
-        Binding("escape", "back", "Back to menu"),
-        Binding("ctrl+c", "cancel", "Cancel"),
-    ]
+    BINDINGS = [*shared_bindings()]
 
     DEFAULT_CSS = """
     #bottom-bar {

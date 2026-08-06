@@ -16,13 +16,13 @@ from pathlib import Path
 
 import click
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Label, Select, TextArea
 
 from ome_zarr_tools.commands.config import read_config, target_config_path, write_config
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
+from ome_zarr_tools.tui.shortcuts import shared_bindings
 from ome_zarr_tools.tui.status import StatusPanel
 
 
@@ -46,14 +46,7 @@ def collect_default_values() -> dict[str, object]:
 
 
 class ConfigScreen(Screen[None]):
-    BINDINGS = [
-        Binding("f5", "run", "Save"),
-        Binding("f6", "copy", "Copy"),
-        Binding("f7", "copy_and_exit", "Copy & exit"),
-        Binding("f8", "toggle_log", "Log"),
-        Binding("escape", "back", "Back to menu"),
-        Binding("ctrl+c", "cancel", "Cancel"),
-    ]
+    BINDINGS = [*shared_bindings(primary_label="Save")]
 
     DEFAULT_CSS = """
     #bottom-bar {

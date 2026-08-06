@@ -25,19 +25,12 @@ from ome_zarr_tools.commands.inspect import build_report, format_text
 from ome_zarr_tools.core.zarr_path import is_remote_path
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
 from ome_zarr_tools.tui.fields import SafePathAutoComplete
+from ome_zarr_tools.tui.shortcuts import shared_bindings
 from ome_zarr_tools.tui.status import StatusPanel
 
 
 class InspectScreen(Screen[None]):
-    BINDINGS = [
-        Binding("f5", "run", "Run"),
-        Binding("f6", "copy", "Copy"),
-        Binding("f7", "copy_and_exit", "Copy & exit"),
-        Binding("f8", "toggle_log", "Log"),
-        Binding("f9", "switch_panel", "Switch panel"),
-        Binding("escape", "back", "Back to menu"),
-        Binding("ctrl+c", "cancel", "Cancel"),
-    ]
+    BINDINGS = [*shared_bindings(), Binding("f9", "switch_panel", "Switch panel")]
 
     DEFAULT_CSS = """
     #bottom-bar {

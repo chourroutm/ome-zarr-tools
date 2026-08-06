@@ -2,12 +2,13 @@
 
 Two screens: a Command Menu (pick a subcommand) and a Command Form (edit all of
 that command's fields together). **No button.** A persistent footer shows
-Run/Copy/Copy-and-exit/toggle-log shortcuts (F5/F6/F7/F8). The equivalent
-direct-CLI invocation is always visible, recomputed on every field edit --
-that visibility, not a confirmation dialog, is what FR-005 relies on. Pressing
-Run executes the command in a worker thread (``tui/execution.py``) without the
-app exiting -- it stays open to show live status/log (User Story 5) until the
-user exits it themselves.
+Run/Copy/Copy-and-exit/toggle-log shortcuts (F5/F6/F7/F8). Running executes
+immediately on Run rather than behind a confirmation dialog (FR-005); the
+equivalent direct-CLI invocation is computed on demand for Copy/Copy-and-exit,
+not rendered as a live preview (spec 003 US2). Pressing Run executes the
+command in a worker thread (``tui/execution.py``) without the app exiting --
+it stays open to show live status/log (User Story 5) until the user exits it
+themselves.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from ome_zarr_tools.tui.fields import (
 from ome_zarr_tools.tui.screens.config_screen import ConfigScreen
 from ome_zarr_tools.tui.screens.inspect_screen import InspectScreen
 from ome_zarr_tools.tui.screens.metadata_screen import FixMetadataScreen, MigrateScreen
+from ome_zarr_tools.tui.shortcuts import shared_bindings
 from ome_zarr_tools.tui.status import StatusPanel
 
 # Commands with their own specialized screen instead of the generic CommandFormScreen.
@@ -76,14 +78,7 @@ class CommandFormScreen(Screen[None]):
     each get their own screen instead of this one -- see ``tui/screens/``.
     """
 
-    BINDINGS = [
-        Binding("f5", "run", "Run"),
-        Binding("f6", "copy", "Copy"),
-        Binding("f7", "copy_and_exit", "Copy & exit"),
-        Binding("f8", "toggle_log", "Log"),
-        Binding("escape", "back", "Back to menu"),
-        Binding("ctrl+c", "cancel", "Cancel"),
-    ]
+    BINDINGS = [*shared_bindings()]
 
     DEFAULT_CSS = """
     #bottom-bar {
@@ -97,7 +92,6 @@ class CommandFormScreen(Screen[None]):
         self.command = command
         self._field_widgets: dict[str, object] = {}
         self._log_lines: list[str] = []
-        self._invocation_label = Label(id="invocation")
         self._status_panel = StatusPanel()
 
     def compose(self) -> ComposeResult:
@@ -112,22 +106,9 @@ class CommandFormScreen(Screen[None]):
                 autocomplete = build_autocomplete(param, widget)
                 if autocomplete is not None:
                     yield autocomplete
-            yield self._invocation_label
         with Vertical(id="bottom-bar"):
             yield self._status_panel
             yield Footer()
-
-    def on_mount(self) -> None:
-        self._refresh_invocation()
-
-    def on_input_changed(self, event) -> None:  # noqa: ANN001
-        self._refresh_invocation()
-
-    def on_checkbox_changed(self, event) -> None:  # noqa: ANN001
-        self._refresh_invocation()
-
-    def on_select_changed(self, event) -> None:  # noqa: ANN001
-        self._refresh_invocation()
 
     def _build_tokens(self) -> list[str] | None:
         """Return the current field values as CLI tokens, or None if a required field is empty."""
@@ -146,9 +127,6 @@ class CommandFormScreen(Screen[None]):
             widget = self._field_widgets[param.name]
             tokens.extend(widget_value_to_tokens(param, widget))  # type: ignore[arg-type]
         return f"ome-zarr-tools {self.command.name} {' '.join(tokens)}".strip()
-
-    def _refresh_invocation(self) -> None:
-        self._invocation_label.update(f"$ {self._invocation_text()}")
 
     def _append_log(self, line: str) -> None:
         self._log_lines.append(line)
