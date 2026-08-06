@@ -1,50 +1,99 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: TEMPLATE (unratified) → 1.0.0
+- Modified principles: n/a (initial ratification)
+- Added sections: I. Code Quality, II. Test-First Development, III. Deliberate Commit
+  Discipline (Non-Negotiable); Quality Gates; Development Workflow; Governance
+- Removed sections: none
+- Deferred placeholders: none — all bracket tokens resolved from repo context
+  (pyproject.toml tooling: ruff, mypy, pytest) and explicit user instruction.
+- Templates checked for alignment: .specify/templates/plan-template.md,
+  spec-template.md, tasks-template.md — no agent-specific references to principle
+  names found, no updates required.
+-->
+
+# OME-Zarr Tools Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Code Quality & Best Practice
+All source changes MUST pass `ruff check` and `ruff format --check` (line length 100,
+`E`/`F`/`I`/`UP`/`B` rule sets) and `mypy` with zero errors before being considered
+done. Prefer editing existing modules over adding new abstractions; do not introduce
+speculative configuration, feature flags, or backwards-compatibility shims for
+scenarios that do not currently exist. Unused dependencies, dead code, and
+organizational-only indirection MUST be removed, not left "for later." Every public
+CLI command and TUI screen MUST degrade gracefully on error (clean `CliError`
+messages, no leaked tracebacks) rather than crashing.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+**Rationale**: This is a small, single-maintainer CLI/TUI tool. Lint and type
+checks are the cheapest available substitute for code review breadth, and a lean
+codebase is what keeps a solo maintainer able to reason about the whole thing.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Test-First Development (NON-NEGOTIABLE)
+Every behavioral change — new command, bug fix, or CLI/TUI interaction change —
+MUST be accompanied by an automated test (`tests/unit` or `tests/integration`)
+that fails without the change and passes with it. The full suite (`pytest`) MUST
+pass, with coverage reporting enabled, before work is reported complete. Bug
+fixes MUST include a regression test that reproduces the original failure mode
+(e.g. a crash, a wrong value, a silently-swallowed error) rather than relying on
+manual verification alone.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+**Rationale**: This tool operates on scientific imaging datasets, often
+irreplaceable and remote (GCS/S3). Silent data corruption or a crash mid-run on
+large data is costly to diagnose after the fact; tests are the primary defense.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Deliberate Commit Discipline (NON-NEGOTIABLE)
+Commits MUST only be created when explicitly requested by the user, and MUST be
+new commits — an existing commit MUST NOT be amended, rebased, or force-pushed,
+even to fix a mistake in the immediately preceding commit, unless the user
+explicitly asks for that specific destructive operation. Every commit MUST leave
+the working tree in a state where lint, type-check, and the full test suite pass.
+Commit messages MUST explain *why* the change was made, not restate the diff.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+**Rationale**: Amending or rewriting history silently destroys prior work and
+is not safely reversible once pushed; always creating a new commit keeps the
+project history an honest, append-only record of what actually happened.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+## Quality Gates
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Before any change is reported as complete, all of the following MUST hold:
+- `ruff check src tests` and `ruff format --check src tests` report no issues.
+- `mypy` reports no errors against the `ome_zarr_tools` package.
+- `pytest` passes in full (unit + integration), including any newly added
+  regression tests for the change just made.
+- For TUI/UI-facing changes, the affected screen(s) MUST be exercised manually
+  (or via a headless Textual test) covering the golden path and at least one
+  edge case, since type/lint/test gates alone do not verify visual or
+  interactive correctness.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+## Development Workflow
+
+- Prefer minimal, targeted diffs; avoid refactoring unrelated code while fixing
+  a bug or adding a feature.
+- When behavior is ambiguous or a fix could take multiple reasonable shapes,
+  ask before implementing rather than guessing.
+- Destructive or hard-to-reverse actions (force-push, `git reset --hard`,
+  discarding uncommitted work, deleting branches) require explicit user
+  confirmation in the moment, regardless of any earlier approval of a similar
+  action.
+- Never write secrets, private URLs, or credentials supplied for local testing
+  into any committed file, test fixture, or artifact.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes ad hoc practice for this repository. Amendments
+are made by editing this file directly, following the same execution flow used
+to create it (`/speckit-constitution`), and MUST include an updated Sync Impact
+Report and version bump:
+- **MAJOR**: backward-incompatible removal or redefinition of a principle.
+- **MINOR**: a new principle or materially expanded section is added.
+- **PATCH**: wording, clarification, or typo fixes with no semantic change.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+Any plan, spec, or task generated by the Spec Kit workflow that conflicts with a
+principle here MUST either be revised to comply or have the conflict explicitly
+justified in that artifact's own complexity/exceptions section — silent
+deviation is not permitted. This document is reviewed for continued accuracy
+whenever the project's tooling (linter, type checker, test runner) changes.
+
+**Version**: 1.0.0 | **Ratified**: 2026-08-06 | **Last Amended**: 2026-08-06
