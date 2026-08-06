@@ -14,6 +14,9 @@ themselves.
 from __future__ import annotations
 
 import click
+from rich.console import Group
+from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -29,6 +32,7 @@ from ome_zarr_tools.tui.fields import (
     is_required,
     widget_value_to_tokens,
 )
+from ome_zarr_tools.tui.logo import Logo
 from ome_zarr_tools.tui.screens.config_screen import ConfigScreen
 from ome_zarr_tools.tui.screens.inspect_screen import InspectScreen
 from ome_zarr_tools.tui.screens.metadata_screen import FixMetadataScreen, MigrateScreen
@@ -44,20 +48,46 @@ _SPECIALIZED_SCREENS: dict[str, type[Screen[None]]] = {
 }
 
 
+def _menu_option_prompt(name: str, command: click.Command) -> Group:
+    """A 3-line Rich prompt for one command's OptionList row (spec 004 US1):
+    name, the command's existing one-line help text (never duplicated,
+    blank if the command has none), and a blank spacing line."""
+    return Group(
+        Text(f"▎ {name}", style="bold"),
+        Text(f"  {command.get_short_help_str(limit=70)}", style="dim"),
+        Text(""),
+    )
+
+
 class CommandMenuScreen(Screen[None]):
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
         Binding("ctrl+c", "cancel", "Cancel"),
     ]
 
+    DEFAULT_CSS = """
+    CommandMenuScreen > OptionList > .option-list--option {
+        color: #d4af37;
+    }
+    """
+
     def __init__(self, commands: dict[str, click.Command]) -> None:
         super().__init__()
         self.commands = commands
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield OptionList(*[Option(name, id=name) for name in sorted(self.commands)])
+        yield Header(show_clock=True)
+        yield Logo()
+        yield OptionList(
+            *[
+                Option(_menu_option_prompt(name, self.commands[name]), id=name)
+                for name in sorted(self.commands)
+            ]
+        )
         yield Footer()
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.query_one(Logo).set_visible_for_size(*event.size)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         name = str(event.option.id)
@@ -95,7 +125,7 @@ class CommandFormScreen(Screen[None]):
         self._status_panel = StatusPanel()
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield Header(show_clock=True)
         with VerticalScroll():
             for param in self.command.params:
                 label = field_label(param) + (" *" if is_required(param) else "")

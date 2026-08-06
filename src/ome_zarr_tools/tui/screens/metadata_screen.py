@@ -94,7 +94,7 @@ class FixMetadataScreen(_BaseMetadataScreen):
         self._before: dict | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield Header(show_clock=True)
         with VerticalScroll():
             yield Label("ZARR_PATH *")
             yield self._path_input
@@ -214,7 +214,7 @@ class MigrateScreen(_BaseMetadataScreen):
         self._before: dict | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield Header(show_clock=True)
         with VerticalScroll():
             yield Label("ZARR_PATH *")
             yield self._path_input

@@ -1,0 +1,72 @@
+"""Spec 004 US1: the command menu screen's logo + 3-line Rich menu entries."""
+
+from __future__ import annotations
+
+import click
+from rich.console import Group
+from textual.widgets import OptionList
+
+from ome_zarr_tools.cli import cli
+from ome_zarr_tools.tui.app import CommandMenuScreen, InteractiveTUIApp
+from ome_zarr_tools.tui.logo import LOGO_MIN_HEIGHT, LOGO_MIN_WIDTH, Logo
+
+COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
+
+
+def _prompt_lines(prompt: object) -> list[str]:
+    assert isinstance(prompt, Group)
+    return [renderable.plain for renderable in prompt.renderables]
+
+
+async def test_menu_shows_logo_above_option_list():
+    app = InteractiveTUIApp(COMMANDS)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, CommandMenuScreen)
+        logo = screen.query_one(Logo)
+        option_list = screen.query_one(OptionList)
+        widgets = list(screen.walk_children())
+        assert widgets.index(logo) < widgets.index(option_list)
+
+
+async def test_menu_option_prompt_is_3_lines_with_name_and_command_help():
+    app = InteractiveTUIApp(COMMANDS)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        first_name = sorted(COMMANDS)[0]
+        option = option_list.get_option(first_name)
+        lines = _prompt_lines(option.prompt)
+        assert len(lines) == 3
+        assert first_name in lines[0]
+        assert COMMANDS[first_name].get_short_help_str(limit=70) in lines[1]
+        assert lines[2] == ""
+
+
+async def test_menu_option_prompt_blank_second_line_for_command_with_no_help():
+    no_help_command = click.Command(name="no_help", callback=lambda: None, help=None)
+    commands = {**COMMANDS, "no_help": no_help_command}
+    app = InteractiveTUIApp(commands)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        option = option_list.get_option("no_help")
+        lines = _prompt_lines(option.prompt)
+        assert lines[1].strip() == ""
+
+
+async def test_menu_resize_toggles_logo_visibility():
+    app = InteractiveTUIApp(COMMANDS)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        logo = app.screen.query_one(Logo)
+        assert logo.display is True
+
+        await pilot.resize_terminal(LOGO_MIN_WIDTH - 1, LOGO_MIN_HEIGHT - 1)
+        await pilot.pause()
+        assert logo.display is False
+
+        await pilot.resize_terminal(80, 30)
+        await pilot.pause()
+        assert logo.display is True

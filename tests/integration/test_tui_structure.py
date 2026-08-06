@@ -2,6 +2,8 @@
 one Header, one status/log region directly above the Footer, one Footer. The
 command menu is exempt from the status/log region (it never runs a command)
 but still shares the same Header/Footer chrome (contract rule 4).
+
+Also spec 004 FR-002d: that shared Header shows a live clock everywhere.
 """
 
 from __future__ import annotations
@@ -32,9 +34,13 @@ async def _assert_skeleton(screen_factory) -> None:  # noqa: ANN001
     app = _ScreenApp(screen_factory)
     async with app.run_test() as pilot:
         await pilot.pause()
+        header = app.screen.query_one(Header)
         assert len(app.screen.query(Header)) == 1
         assert len(app.screen.query(Footer)) == 1
         assert len(app.screen.query(StatusPanel)) == 1
+        # Header(show_clock=...) has no public getter; Textual's own
+        # attribute is `_show_clock` (spec 004 FR-002d).
+        assert header._show_clock is True  # noqa: SLF001
 
 
 async def test_command_form_screen_has_one_header_one_status_panel_one_footer():
@@ -61,6 +67,8 @@ async def test_command_menu_screen_shares_header_footer_chrome_with_no_status_pa
     app = _ScreenApp(lambda: CommandMenuScreen(COMMANDS))
     async with app.run_test() as pilot:
         await pilot.pause()
+        header = app.screen.query_one(Header)
         assert len(app.screen.query(Header)) == 1
         assert len(app.screen.query(Footer)) == 1
         assert len(app.screen.query(StatusPanel)) == 0
+        assert header._show_clock is True  # noqa: SLF001

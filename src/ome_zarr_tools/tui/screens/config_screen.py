@@ -77,7 +77,7 @@ class ConfigScreen(Screen[None]):
         self._status_panel = StatusPanel()
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield Header(show_clock=True)
         with VerticalScroll():
             yield Label("Scope")
             yield self._scope_select
