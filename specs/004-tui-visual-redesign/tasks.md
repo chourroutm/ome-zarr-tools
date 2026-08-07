@@ -23,6 +23,39 @@ are pre-checked.
 headless/`Pilot`-driven verification already exercised by the test suite and
 during implementation) is the one item still open.
 
+**Post-implementation tweaks** (direct, outside `/speckit-implement`, still
+covered by tests/quality gates): field-group frame borders changed from
+"tall" to "solid" red/blue; both field-group frames given a 1-character
+margin/padding and `height: auto;` so they size to content instead of
+expanding; the Command Identity frame (T036) redesigned from a titled
+gold-round-bordered frame to a borderless block (bold name, description
+underneath capped at 3 lines, `padding: 1 2;`); a blank line
+(`margin-bottom: 1;`) added between fields within each group (not after
+the last); the remote-path add-on restyled to match `Input`'s own box
+exactly (`border: tall $border-blurred;`, `padding: 0 2;`, `background:
+$surface;`) instead of a plain colored label, fixing both its vertical
+alignment with the `Input`'s text and its visual "thinness" mismatch;
+per-field required-star markers removed (redundant with the "Required"
+frame); Browse button hidden while a field's remote-path add-on is shown
+(FR-019, reversed from its original "always visible" wording);
+`BrowsePickerScreen` gained a way to reach directories outside its
+initial root's descendants, since `DirectoryTree` can't do that on its
+own (FR-009a) — this also surfaced and fixed 3 existing
+`test_tui_browse_picker.py` tests whose `pilot.click(button)` calls had
+started landing outside the default 80x24 test viewport as the
+cumulative frame/margin/padding changes above pushed content further
+down; each now calls `button.scroll_visible()` before clicking. This
+went through two iterations: first a `backspace`-only "Up" key binding
+(the user reported it didn't fire in their real terminal — physical
+Backspace sends different byte sequences across terminals/multiplexers),
+then a clickable `#up-button` + `#current-path` label (the user reported
+this "does not work" too, without further detail), finally replaced
+with an editable, pre-filled `#root-path-input` above the tree that
+re-roots on submit (Enter) if the typed value is a valid directory —
+avoiding any dependency on a specific key or click target entirely, and
+letting the user jump straight to any path rather than one level at a
+time.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files/regions, no dependency on an unfinished task)
@@ -66,7 +99,7 @@ here still stands). Listed for a complete task record only.
 
 ## Phase 4: User Story 2 - Forms that look designed, not dumped (Priority: P2)
 
-**Goal**: Required/optional field-group frames (tall red / tall blue,
+**Goal**: Required/optional field-group frames (solid red / solid blue,
 live still-empty-count subtitle on the required frame) on every prep
 screen.
 
@@ -76,14 +109,14 @@ a tall-blue "Optional" frame; confirm Copy's CLI token is unaffected.
 
 ### Tests for User Story 2 ⚠️ write first, confirm they FAIL
 
-- [X] T004 [P] [US2] Failing test: `build_field_frames()` produces required-before-optional frame order, omits an empty group's frame entirely, and applies `border: tall red;`/`border: tall blue;` + correct `border_title`s — in `tests/integration/test_tui_visual_design.py`
+- [X] T004 [P] [US2] Failing test: `build_field_frames()` produces required-before-optional frame order, omits an empty group's frame entirely, and applies `border: solid red;`/`border: solid blue;` + correct `border_title`s — in `tests/integration/test_tui_visual_design.py`
 - [X] T005 [P] [US2] Failing test: the required frame's `border_subtitle` starts at the correct count, decrements/increments as required fields are filled/cleared, and reads `"0 remaining"` once all are filled (not omitted/stale) — in `tests/integration/test_tui_visual_design.py`
 - [X] T006 [P] [US2] Failing regression test: CLI tokens (Run/Copy/Copy & exit) produced by every prep screen are byte-for-byte unchanged by frame grouping (FR-007) — in `tests/integration/test_tui_visual_design.py`
 
 ### Implementation for User Story 2
 
 - [X] T007 [US2] Add `FieldSpec` dataclass (`label: str`, `widget: Widget`, `required: bool`, `autocomplete: Widget | None = None`, `browse: Widget | None = None`) to `src/ome_zarr_tools/tui/fields.py`
-- [X] T008 [US2] Add `build_field_frames(specs: list[FieldSpec]) -> list[Vertical]` to `src/ome_zarr_tools/tui/fields.py`: required frame (`border: tall red;`, `border_title="Required"`) before optional frame (`border: tall blue;`, `border_title="Optional"`); omit either frame if its group is empty (depends on T007)
+- [X] T008 [US2] Add `build_field_frames(specs: list[FieldSpec]) -> list[Vertical]` to `src/ome_zarr_tools/tui/fields.py`: required frame (`border: solid red;`, `border_title="Required"`) before optional frame (`border: solid blue;`, `border_title="Optional"`); omit either frame if its group is empty (depends on T007)
 - [X] T009 [US2] Add a helper computing "count of required `FieldSpec`s whose widget is currently empty" and wire the required frame's `border_subtitle` to it in/around `build_field_frames()` (depends on T008)
 - [X] T010 [US2] Rewrite `CommandFormScreen.compose()` in `src/ome_zarr_tools/tui/app.py` to build one `FieldSpec` per `click.Parameter` and call `build_field_frames()` instead of the flat field loop; recompute the required subtitle from the screen's field-changed handling (depends on T007-T009)
 - [X] T011 [US2] Rewrite `InspectScreen.compose()` in `src/ome_zarr_tools/tui/screens/inspect_screen.py` to build its own short `FieldSpec` list and call `build_field_frames()` (depends on T007-T009)

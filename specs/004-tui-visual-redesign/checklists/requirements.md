@@ -54,8 +54,8 @@
   treatment was extended from `gs://`/`s3://` to every remote scheme the
   tool already accepts.
 - 2026-08-06 addendum (still P2/US2, not yet implemented): user specified
-  the required frame's border as "tall red" and the optional frame's as
-  "tall blue" (Textual's own named border styles — treated as UX
+  the required frame's border as "solid red" and the optional frame's as
+  "solid blue" (Textual's own named border styles — treated as UX
   vocabulary per the widget-naming precedent above, not an implementation
   detail), and that the required frame's subtitle must show the count of
   still-empty required fields, recomputed live (FR-004a/FR-004b,

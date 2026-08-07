@@ -9,16 +9,17 @@
 Redesign the Textual TUI's visual surface, and its run/navigation flow,
 across 7 user stories: a static ASCII logo + 3-line Rich `OptionList`
 entries on the command menu (US1); required/optional field-group frames on
-every command screen, with a tall red/tall blue border per group and a
+every command screen, with a solid red/solid blue border per group and a
 live still-empty-count subtitle on the required frame (US2);
 human-readable field labels with CLI tokens unchanged (US3); a
 `ModalScreen`-based directory-tree "Browse" picker beside every path field
 (US4); a Bootstrap-input-group-style colored add-on for
 `gs://`/`gcs://`/`s3://`/`az://`/`abfs://`/`http://`/`https://` path
-prefixes, with autocomplete suppressed while shown (US5); a titled,
-gold-bordered Command Identity frame (name + description) shown at the top
-of every prep screen *and* reused at the top of that command's Result
-screen (US6); and, on Run, immediate navigation to a dedicated Command
+prefixes, with autocomplete suppressed while shown (US5); a borderless
+Command Identity block (bold name + description underneath, capped at 3
+lines) shown at the top of every prep screen *and* reused at the top of
+that command's Result screen (US6); and, on Run, immediate navigation to
+a dedicated Command
 Result screen showing a live progress bar/sparkline (the existing
 `StatusPanel`, relocated) while the command runs, then that command's
 specific outcome once it finishes — one shared `CommandResultScreen` base
@@ -189,11 +190,12 @@ src/
         │                             # pending run (US7)
         ├── fields.py                 # MODIFIED: field_label() -> human-readable
         │                             # casing (US3); NEW FieldSpec dataclass,
-        │                             # build_field_frames() -- tall red/tall blue
-        │                             # borders, live required-count
-        │                             # border_subtitle (US2); NEW
-        │                             # build_identity_frame() -- gold round
-        │                             # border (US6); NEW REMOTE_SCHEME_COLORS
+        │                             # build_field_frames() -- solid red/solid blue
+        │                             # borders, 1-char margin/padding, live
+        │                             # required-count border_subtitle (US2); NEW
+        │                             # build_identity_frame() -- borderless,
+        │                             # bold name + 3-line-capped description
+        │                             # (US6); NEW REMOTE_SCHEME_COLORS
         │                             # table, add-on Horizontal composition +
         │                             # Input.Changed handler (US5); NEW Browse
         │                             # Button wiring per path field (US4)

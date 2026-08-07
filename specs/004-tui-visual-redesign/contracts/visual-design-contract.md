@@ -17,9 +17,11 @@ back into per-screen one-offs (the same reasoning as `003`'s
 | Element | Rule |
 |---|---|
 | Order | Required frame before Optional frame. Empty group → that frame is omitted entirely. |
-| Border | Required frame: `border: tall red;`. Optional frame: `border: tall blue;`. |
+| Border | Required frame: `border: solid red;`. Optional frame: `border: solid blue;`. |
 | Title | `border_title = "Required"` / `"Optional"`, exact strings, so tests can assert on them. |
 | Subtitle | Required frame only: `border_subtitle = f"{n} remaining"`, `n` = count of required fields currently empty. Recomputed on every required-field value change, including reaching `"0 remaining"`. Optional frame: no subtitle. |
+| Sizing | `height: auto;` (sized to content, never expands to fill the screen) plus `margin: 1;`/`padding: 1;` (1 character on every side), on both frames. |
+| Field spacing | Each field's widget gets `margin-bottom: 1` (a blank line) except the last field in the group, so fields read as visually separate without a trailing gap before the frame's own bottom padding. |
 
 ## Field labels (User Story 3)
 
@@ -27,15 +29,15 @@ back into per-screen one-offs (the same reasoning as `003`'s
 |---|
 | `click.Parameter`-derived labels: `param.name.replace("_", " ").title()`. |
 | Specialized-screen hand-built labels: already-human-readable literal text at the call site. |
-| Required marker (trailing `*`) unchanged, appended after the label text. |
+| No per-field required marker — required-ness is conveyed by the "Required" field-group frame (above) alone, not decorated onto individual labels. |
 | CLI token generation (`widget_value_to_tokens`) is entirely independent of label text — never derived from it. |
 
 ## Browse picker (User Story 4)
 
 | Element | Rule |
 |---|---|
-| Button | Every path-typed field: `Button("Browse", ...)`, `height: 3`, positioned to the right of the input (and, when present, to the right of the remote-path add-on). |
-| Picker | `ModalScreen[Path \| None]`, rooted at the field's current value's parent dir (or cwd). |
+| Button | Every path-typed field: `Button("Browse", ...)`, `height: 3`, positioned to the right of the input (and, when present, to the right of the remote-path add-on); hidden while the remote-path add-on (User Story 5) is shown (FR-019). |
+| Picker | `ModalScreen[Path \| None]`, rooted at the field's current value's parent dir (or cwd). An editable `Input` (`#root-path-input`, above the tree, pre-filled with the current root) lets the user type any path and re-root the tree at it on submit (Enter) — including an ancestor of the initial root, since `DirectoryTree` only shows a root's descendants on its own. A submitted value that isn't a valid directory is rejected (error `notify()`, root unchanged). |
 | Constraint | `only="dir" \| "file" \| "any"`, derived from the field's `click.Path(dir_okay=..., file_okay=...)`, enforced via `DirectoryTree.filter_paths()`. |
 | Cancel | Dismiss with `None` → field unchanged. Select → field set to the chosen `Path`, every other field untouched. |
 
@@ -54,6 +56,7 @@ back into per-screen one-offs (the same reasoning as `003`'s
 | Bare scheme alone (e.g. exactly `"gs://"`) → plain editable text, no add-on. |
 | Add-on shown → local-filesystem autocomplete disabled for that field. |
 | Deleting the `Input`'s text to empty while an add-on is shown → add-on removed, `Input`'s text becomes the bare scheme string. |
+| Sizing/background: `height: 3;`, `padding: 0 2;`, `background: $surface;`, and `border: tall $border-blurred;` — all matching the `Input`'s own unfocused styling exactly, so the two read as one continuous box rather than a thin `Input` beside a visually heavier solid block. `content-align: left middle;` keeps the scheme text on the same row as the `Input`'s own text. |
 | CLI token = add-on's scheme text (if shown) + `Input`'s text, always — identical to the same full string typed into a plain field. |
 
 ## Command identity frame (User Story 6)
@@ -61,9 +64,9 @@ back into per-screen one-offs (the same reasoning as `003`'s
 | Element | Rule |
 |---|---|
 | Placement | Yielded first in every prep screen's `compose()`, above the field content. |
-| Border | `border: round #d4af37;` — distinct from the field-group frames' tall red/tall blue. |
-| Title | `border_title = command.name`. |
-| Description | A `Label` inside the frame, `command.get_short_help_str(limit=70)` — same source as the menu entry's line 2 (FR-002c); blank, not an error, for a command with no help text. |
+| Border | None — borderless, `height: auto;`, `padding: 1 2;` (1 top/bottom, 2 left/right) — distinct from the field-group frames' solid red/solid blue borders. |
+| Name | A `Label` (`#identity-name`, `text-style: bold;`), `command.name`. |
+| Description | A `Label` (`#identity-description`, `width: 100%; max-height: 3;`) underneath the name, `command.get_short_help_str(limit=10_000)` — same source as the menu entry's line 2 (FR-002c) but unbounded, so it is never ellipsis-ed even when the menu's 70-char teaser would truncate it; capped at 3 rendered lines regardless of length; blank, not an error, for a command with no help text. |
 
 ## Command result screen (User Story 7)
 

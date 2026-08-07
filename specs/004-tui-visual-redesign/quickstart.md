@@ -33,8 +33,8 @@ untouched.
 ## Manual walkthrough (User Story 2/3 — frames, labels)
 
 1. Open `from_images` (mixed required/optional fields). Confirm a
-   "Required" frame (tall red border) appears above an "Optional" frame
-   (tall blue border), each titled.
+   "Required" frame (solid red border) appears above an "Optional" frame
+   (solid blue border), each titled.
 2. Confirm the Required frame's subtitle shows the correct count of empty
    required fields (e.g. "3 remaining"); fill one in and confirm the count
    decreases by one; fill in all of them and confirm it reads
@@ -72,13 +72,16 @@ untouched.
 ## Manual walkthrough (User Story 6 — command identity frame)
 
 1. Open any command's prep screen (generic or specialized). Confirm a
-   titled, gold-bordered frame appears above the field content, showing
-   the command's name and its CLI description.
+   borderless block appears above the field content, showing the
+   command's name in bold with its CLI description underneath, and a bit
+   of padding around both.
 2. Confirm the description text matches the same text shown for that
-   command in the menu's second line.
-3. Confirm the identity frame is visually distinguishable from the
+   command in the menu's second line, and that even a long description
+   never grows past 3 lines.
+3. Confirm the identity block is visually distinguishable from the
    required/optional field-group frames (User Story 2) on the same
-   screen.
+   screen — no border/title, unlike the field-group frames' solid
+   borders.
 
 ## Manual walkthrough (User Story 7 — command result screen, progress, Restore Defaults)
 

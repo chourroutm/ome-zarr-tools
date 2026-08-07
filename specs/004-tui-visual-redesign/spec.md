@@ -62,8 +62,8 @@ the specialized `fix_metadata`/`migrate`/`inspect`/`config` screens) and
 sees required fields grouped together, ahead of optional fields, each group
 inside its own titled, bordered frame — instead of today's single
 undifferentiated, unframed list in whatever order Click happened to declare
-the parameters. The required-fields frame uses a tall red border, the
-optional-fields frame a tall blue border, so the two groups are
+the parameters. The required-fields frame uses a solid red border, the
+optional-fields frame a solid blue border, so the two groups are
 distinguishable at a glance even before reading either title. The
 required-fields frame's subtitle also tells the user, at all times, how
 many of its fields are still empty — so they can tell they're done without
@@ -127,8 +127,10 @@ uses the original flag/argument name.
    label is shown as capitalized, space-separated words (e.g. "Voxel Size
    Unit") instead of the raw CLI flag/argument name (e.g. `--voxel_size_unit`).
 2. **Given** a required field's label now reads in this human-readable
-   form, **When** the user views it, **Then** the required-field marker
-   (currently a trailing `*`) is still present and legible.
+   form, **When** the user views it, **Then** the label carries no
+   per-field required marker — required-ness is conveyed by the
+   "Required" field-group frame it's grouped under (User Story 2),
+   not by decorating the label itself.
 3. **Given** the user fills in a relabeled field and copies the invocation,
    **When** they inspect the clipboard content, **Then** it uses the
    original CLI flag/argument name, unaffected by the label's display case.
@@ -172,6 +174,14 @@ the field is filled with that path and the form is otherwise unchanged.
 5. **Given** a field that only accepts a directory (or only a file),
    **When** the directory-tree view is open, **Then** only entries
    matching that constraint are selectable.
+6. **Given** the directory-tree view is open, **When** the user edits the
+   pre-filled path field above the tree and submits a different, valid
+   directory, **Then** the view re-roots at that directory, making
+   entries previously outside the tree entirely (an ancestor, a sibling,
+   or any other reachable directory) reachable.
+7. **Given** the user submits a value in that path field that is not a
+   valid directory, **When** submission completes, **Then** the view
+   shows an error and the root is left unchanged.
 
 ---
 
@@ -248,17 +258,19 @@ name and description, sourced from the same text as its menu entry.
 **Acceptance Scenarios**:
 
 1. **Given** any command's prep screen, **When** it renders, **Then** a
-   bordered, titled frame appears above the field content containing the
-   command's name and its existing CLI description text.
+   block appears above the field content showing the command's name in
+   bold and its existing CLI description text underneath, with no border
+   or title.
 2. **Given** a command with no CLI help text, **When** its prep screen
-   renders, **Then** the frame still shows the command name, with the
+   renders, **Then** the block still shows the command name, with the
    description area rendering blank rather than an error (same precedent
    as FR-002c).
-3. **Given** the command-identity frame and the required/optional
+3. **Given** the command-identity block and the required/optional
    field-group frames (User Story 2) are both shown on the same screen,
-   **When** the user views it, **Then** the identity frame is visually
-   distinguishable from the field-group frames, so the different frame
-   types don't blur together.
+   **When** the user views it, **Then** the identity block is visually
+   distinguishable from the field-group frames (borderless vs. solid
+   red/solid blue borders), so the different content types don't blur
+   together.
 
 ---
 
@@ -383,7 +395,7 @@ empty still blocks Run without navigating anywhere.
 - What happens if the user presses Cancel/Escape instead of Run? No
   execution occurs, so there is nothing to navigate to — this exits the
   app the same way it already does, unchanged by User Story 7.
-- What happens to the Command Identity Frame's title/description for a
+- What happens to the Command Identity Frame's name/description for a
   specialized screen with no directly corresponding `click.Command` help
   text at the point it's rendered? It uses that command's existing CLI
   help text exactly as the command menu already does (User Story 6,
@@ -428,8 +440,8 @@ empty still blocks Run without navigating anywhere.
 - **FR-004**: Required fields MUST be enclosed in one titled, bordered
   frame; optional fields MUST be enclosed in a separate titled, bordered
   frame. A group with no fields MUST NOT render an empty frame.
-- **FR-004a**: The required-fields frame MUST use a tall red border style;
-  the optional-fields frame MUST use a tall blue border style.
+- **FR-004a**: The required-fields frame MUST use a solid red border style;
+  the optional-fields frame MUST use a solid blue border style.
 - **FR-004b**: The required-fields frame's border subtitle MUST show the
   count of required fields that are currently empty (e.g. "2 remaining"),
   recomputed whenever a required field's value changes, including reaching
@@ -437,8 +449,10 @@ empty still blocks Run without navigating anywhere.
 - **FR-005**: Field labels MUST be rendered as capitalized, space-separated
   words derived from the parameter's name, instead of the raw CLI
   flag/argument name.
-- **FR-006**: The required-field marker MUST remain visible and legible
-  alongside the new label casing and frame layout.
+- **FR-006**: Individual field labels MUST NOT carry a per-field
+  required marker — required-ness is conveyed solely by the "Required"
+  field-group frame (FR-004a) a field is grouped under, avoiding a
+  redundant marker alongside the new label casing and frame layout.
 - **FR-006a**: A field label too long to fit the frame's width MUST wrap
   to a second line rather than truncating — no label text may be hidden
   from the user, and the frame's border MUST NOT break as a result.
@@ -451,6 +465,14 @@ empty still blocks Run without navigating anywhere.
 - **FR-009**: Pressing Browse MUST open a `DirectoryTree`-based view of the
   local filesystem, rooted at the field's current value's parent directory
   if set, otherwise the current working directory.
+- **FR-009a**: The directory-tree view MUST provide a way to navigate to
+  a directory outside the current root's descendants — e.g. an ancestor
+  or sibling of wherever the picker happened to open — since a directory
+  tree by itself only exposes its root's descendants. This MUST NOT
+  depend solely on a specific physical key (e.g. Backspace), since key
+  delivery is not guaranteed to be identical across every
+  terminal/multiplexer; an editable, pre-filled path field the user can
+  type into and submit satisfies this without that dependency.
 - **FR-010**: Selecting an entry in the directory-tree view MUST fill the
   corresponding field with that path and return to the form without
   altering any other field's value; dismissing without selecting MUST leave
@@ -486,16 +508,20 @@ empty still blocks Run without navigating anywhere.
   Copy, and Copy & exit MUST be identical to what a single plain-text field
   containing the same full value would produce.
 - **FR-019**: A path field's Browse button (User Story 4), where present,
-  MUST remain positioned to the right of the whole field (add-on + input),
-  unaffected by whether the add-on is shown.
-- **FR-020**: Every command prep screen MUST display a bordered, titled
-  frame above its field content showing the command's name and its
-  existing CLI description text, sourced identically to the command
+  MUST remain positioned to the right of the whole field (add-on + input)
+  when shown, but MUST be hidden while the remote-path add-on (User
+  Story 5) is shown, since browsing the local filesystem does not apply
+  to a remote path; it reappears once the add-on is removed.
+- **FR-020**: Every command prep screen MUST display a block above its
+  field content showing the command's name in bold, with its existing
+  CLI description text underneath, sourced identically to the command
   menu's entry (FR-002c) — never a separately maintained copy.
-- **FR-021**: The command-identity frame (FR-020) MUST be visually
+- **FR-021**: The command-identity block (FR-020) MUST be visually
   distinguishable from the required/optional field-group frames (FR-004a)
-  by border style/color, so a screen showing both frame types does not
-  visually conflate them.
+  — it is borderless (unlike the field-group frames' solid borders) and
+  its description is capped at 3 lines regardless of length, so a screen
+  showing both cannot visually conflate them or let a long description
+  push the rest of the screen down.
 - **FR-022**: Pressing Run, once all required fields are filled, MUST
   immediately navigate to a dedicated Command Result screen for that
   command — the app MUST NOT wait for the command to finish before
@@ -549,28 +575,34 @@ empty still blocks Run without navigating anywhere.
 - **Command Menu Entry**: A single, selectable, 3-line highlightable block
   in the command menu's list (up from today's 1-line list item): command
   name, its existing CLI help text, and a blank spacing line.
-- **Field Group Frame**: A titled, bordered container holding either all of
-  a form's required fields or all of its optional fields; omitted entirely
-  if that group is empty. The required frame uses a tall red border and a
-  subtitle showing its still-empty field count; the optional frame uses a
-  tall blue border.
+- **Field Group Frame**: A titled, bordered container (1-character margin
+  and padding, sized to its content rather than expanding to fill the
+  screen) holding either all of a form's required fields or all of its
+  optional fields; omitted entirely if that group is empty. The required
+  frame uses a solid red border and a subtitle showing its still-empty
+  field count; the optional frame uses a solid blue border.
 - **Field Label**: The human-readable, capitalized/space-separated text
   shown next to a field, derived from (but never altering) the underlying
   CLI parameter name.
-- **Browse Picker**: A 3-row button beside a path field's input; opens a
-  `DirectoryTree`-based view rooted near the field's current value,
-  constrained to directories/files per the field's type, that fills the
-  field on selection and leaves it unchanged on cancel.
+- **Browse Picker**: A 3-row button beside a path field's input (hidden
+  while that field's remote-path add-on is shown); opens a
+  `DirectoryTree`-based view rooted near the field's current value, with
+  an editable, pre-filled path field above the tree the user can submit
+  to re-root anywhere (since the tree otherwise can't reach directories
+  outside the current root's descendants), constrained to
+  directories/files per the field's type, that fills the field on
+  selection and leaves it unchanged on cancel.
 - **Remote Path Add-on**: A non-editable, provider-colored prefix (blue:
   `gs://`/`gcs://`; orange: `s3://`; cyan: `az://`/`abfs://`; gray:
   `http://`/`https://`) shown to the left of a path field's input when its
   value starts with that scheme and has additional text after it; reverts
   to plain editable text (scheme included) when the remainder is emptied.
-- **Command Identity Frame**: A titled, bordered frame showing the
-  command's name and its existing CLI description text; shown at the top
-  of every prep screen above the field content, and reused unchanged at
-  the top of that command's Result screen; visually distinct from the
-  required/optional field-group frames.
+- **Command Identity Frame**: A borderless block showing the command's
+  name in bold with its existing CLI description text underneath (capped
+  at 3 lines); shown at the top of every prep screen above the field
+  content, and reused unchanged at the top of that command's Result
+  screen; visually distinct from the required/optional field-group
+  frames' solid borders.
 - **Command Result Screen**: The screen the app navigates to immediately
   on Run (not after it finishes). One shared base class provides common
   chrome (the Command Identity Frame, a pending-state progress
@@ -595,8 +627,8 @@ empty still blocks Run without navigating anywhere.
   behavior unchanged.
 - **SC-002**: 100% of command forms with a mix of required/optional fields
   show two frames (Required, Optional), with all required fields inside the
-  first and all optional fields inside the second, the first in a tall red
-  border and the second in a tall blue border.
+  first and all optional fields inside the second, the first in a solid red
+  border and the second in a solid blue border.
 - **SC-002a**: On every command form with at least one required field, the
   required frame's subtitle always matches the true count of currently
   empty required fields, verified after every field edit.
@@ -714,10 +746,10 @@ empty still blocks Run without navigating anywhere.
   existing mechanism to turn it on/off as the value changes later. FR-016
   is new dynamic behavior, not a tweak to something that already reacts to
   keystrokes.
-- **Command Identity Frame styling**: distinct from the tall red/tall blue
-  field-group frames (User Story 2) so the three frame types read
-  differently at a glance; exact border style/color is a `/speckit-plan`
-  detail, not specified by the user.
+- **Command Identity Frame styling**: borderless (bold name + description
+  underneath, capped at 3 lines, a bit of padding) so it reads distinctly
+  from the solid red/solid blue field-group frames (User Story 2) at a
+  glance, per explicit user direction.
 - **"Command result page" scope**: applied uniformly to every command,
   including `inspect`/`fix_metadata`/`migrate`/`config`, which already
   show rich preview content (report/diff/current-config) inline, live,

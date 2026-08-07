@@ -62,8 +62,8 @@ refactor than this feature needs.
 ## Decision: Frame border style/color and a live required-count subtitle
 
 **Decision**: `build_field_frames()`'s required-fields `Vertical` gets
-`border: tall red;` and its optional-fields `Vertical` gets
-`border: tall blue;` (per-container CSS, not a shared class, since the two
+`border: solid red;` and its optional-fields `Vertical` gets
+`border: solid blue;` (per-container CSS, not a shared class, since the two
 frames need different colors) — `tall` and the named colors `red`/`blue`
 are confirmed built-in Textual border-edge/color values (checked directly
 against the installed `textual` package: `tall` is one of
@@ -79,7 +79,7 @@ required `FieldSpec`s whose widget currently has no value, recomputed by
 every time a required field's value changes.
 
 **Rationale**: Directly satisfies FR-004a/FR-004b as the user specified
-them ("tall red"/"tall blue" border styles, a subtitle showing the
+them ("solid red"/"solid blue" border styles, a subtitle showing the
 still-empty count) using Textual's own built-in border/label mechanics —
 no custom border-drawing or extra widget needed. Recomputing from each
 screen's existing change handler (rather than adding a new polling/timer
@@ -97,20 +97,23 @@ mechanism that would need its own verification.
 ## Decision: Command Identity Frame as a small shared builder, reusing the menu's help-text source
 
 **Decision**: New `tui/fields.py` function `build_identity_frame(command:
-click.Command) -> Vertical` returns one `Vertical` container: `border:
-round #d4af37;` (the app's existing gold accent color from
-`CommandMenuScreen`'s `DEFAULT_CSS`), `border_title = command.name`,
-containing a single `Label(command.get_short_help_str(limit=70))` as its
-body — the exact same source `_menu_option_prompt()` already uses for the
-menu's line 2 (FR-002c's never-duplicated-copy rule extended to FR-020).
+click.Command) -> Vertical` returns one borderless `Vertical` container
+(`padding: 1 2;`, sized to its content) holding two `Label`s: the command
+name (`text-style: bold;`) and, underneath it, the description —
+`Label(command.get_short_help_str(limit=10_000))`, the same source
+`_menu_option_prompt()` uses for the menu's line 2 (FR-002c's
+never-duplicated-copy rule extended to FR-020), with an effectively
+unbounded limit so it's never ellipsis-ed, but `max-height: 3;` so a long
+description is capped rather than pushing the rest of the screen down.
 Every prep screen's `compose()` yields this once, first, before
 `build_field_frames()`'s output.
 
-**Rationale**: A distinct, already-meaningful color (gold, the menu's own
-highlight color) satisfies FR-021's "visually distinguishable from the
-tall red/tall blue field frames" without inventing a fourth arbitrary
-color choice. Reusing `get_short_help_str` rather than `command.help`
-keeps it consistent with the one-line-of-description convention already
+**Rationale**: Removing the border/title (per explicit user direction)
+already satisfies FR-021's "visually distinguishable from the solid
+red/solid blue field frames" — a borderless block reads as clearly
+different from a bordered one without needing a fourth arbitrary color.
+Reusing `get_short_help_str` rather than `command.help` keeps it
+consistent with the one-line-of-description convention already
 established for menu entries, rather than introducing a second,
 longer-form description source.
 

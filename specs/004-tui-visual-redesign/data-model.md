@@ -45,11 +45,15 @@ screen's required fields or all of its optional fields; omitted if empty.
 list[FieldSpec]) -> list[Vertical]`, returning 1 or 2 `Vertical` containers,
 each containing its specs' labels+widgets(+autocomplete/+browse), in the
 order specs were given, required-frame first (per spec.md's documented
-assumption). The required container gets `border: tall red;`,
-`border_title = "Required"`, and `border_subtitle` set to `f"{n}
-remaining"` (`n` = count of required specs whose widget is currently
-empty); the optional container gets `border: tall blue;`,
-`border_title = "Optional"`, no subtitle.
+assumption). Each field's widget gets `margin-bottom: 1;` (a blank line
+separating it from the next field) except the last field in the group.
+Both containers get `height: auto;` (sized to content rather than
+expanding to fill the screen) plus a 1-character `margin`/`padding`.
+The required container gets `border: solid red;`, `border_title =
+"Required"`, and `border_subtitle` set to `f"{n} remaining"` (`n` = count
+of required specs whose widget is currently empty); the optional
+container gets `border: solid blue;`, `border_title = "Optional"`, no
+subtitle.
 
 **Relationships**: `CommandFormScreen.compose()` builds one `FieldSpec` per
 `click.Parameter` and passes the list to `build_field_frames()`. Each
@@ -86,14 +90,30 @@ classes="browse-button")` (styled `height: 3` for the "3-row" requirement)
 per path-typed `FieldSpec`, wired to push
 `tui/screens/browse_screen.py`'s `BrowsePickerScreen(root: Path, only:
 Literal["dir", "file", "any"]) -> ModalScreen[Path | None]`. The screen
-composes a `SafeDirectoryTree` (a `DirectoryTree` subclass overriding
+composes an `Input(str(self.root), id="root-path-input")` above the
+`SafeDirectoryTree` (a `DirectoryTree` subclass overriding
 `filter_paths()` per `only`, and tolerating `PermissionError` like
-`SafePathAutoComplete` already does) and dismisses with the selected
-`Path`, or `None` on cancel.
+`SafePathAutoComplete` already does), plus a `Footer`, and dismisses with
+the selected `Path`, or `None` on cancel. `on_input_submitted()` parses
+the `Input`'s value as a `Path`; if it's a valid directory, re-roots both
+`self.root` and the tree's `path` at it (letting the user type anywhere,
+including an ancestor of the initial root, since `DirectoryTree` only
+exposes its root's descendants on its own — FR-009a); otherwise it
+`notify()`s an error and leaves the root unchanged. (An earlier design
+used a clickable "Up" button plus a `backspace` key binding instead; the
+user reported the key binding didn't fire in their real terminal —
+physical Backspace sends different byte sequences across
+terminals/multiplexers — so both were replaced by this editable-path
+approach, which also lets the user jump directly to any path rather than
+only one level at a time.) `PathField` hides its own Browse button
+(`_browse_button.display = False`) for as long as the remote-path add-on
+is shown, reappearing when it's removed (FR-019).
 
 **State transition**: Button pressed → modal pushed → user selects entry
 (`dismiss(path)`) or cancels (`dismiss(None)`) → callback on the calling
 screen sets the field's value only if the result is not `None`.
+Submitting the path `Input` (Enter) while the modal is open re-roots it
+without dismissing, if the typed value is a valid directory.
 
 ## Remote Path Add-on
 
@@ -131,15 +151,18 @@ the CLI token is identical regardless of visual state (FR-007/FR-018).
 
 ## Command Identity Frame
 
-**Represents**: A titled, bordered frame at the top of every prep screen,
-above the field content, showing the command's name and its existing CLI
-description.
+**Represents**: A borderless block at the top of every prep screen, above
+the field content, showing the command's name in bold with its existing
+CLI description underneath.
 
 **Representation**: `tui/fields.py`'s `build_identity_frame(command:
-click.Command) -> Vertical`, returning one `Vertical` (`border: round
-#d4af37;`, `border_title = command.name`) containing a single
-`Label(command.get_short_help_str(limit=70))` (the same help-text source
-`_menu_option_prompt()` already uses).
+click.Command) -> Vertical`, returning one `Vertical` (`height: auto;`,
+`padding: 1 2;`, no border) containing two `Label`s: `#identity-name`
+(`text-style: bold;`, `command.name`) and `#identity-description`
+(`width: 100%; max-height: 3;`,
+`Label(command.get_short_help_str(limit=10_000))` — the same help-text
+source `_menu_option_prompt()` uses, but unbounded so it is never
+ellipsis-ed, just capped at 3 rendered lines).
 
 **Relationships**: Every prep screen's `compose()`
 (`CommandFormScreen`, `InspectScreen`, `FixMetadataScreen`,
