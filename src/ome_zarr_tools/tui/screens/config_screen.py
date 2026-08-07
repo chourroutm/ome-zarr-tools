@@ -1,4 +1,5 @@
-"""`config` screen: scope picker, current-vs-defaults view, editable JSON (FR-017).
+"""`config` screen: scope picker, current-vs-defaults view, editable JSON (FR-017),
+plus its own Result screen showing the written config JSON (spec 004 US7).
 
 Reuses ``commands/config.py``'s existing ``read_config``/``write_config``/
 ``target_config_path`` (data-model.md § Config Editor) rather than reformatting
@@ -16,12 +17,15 @@ from pathlib import Path
 
 import click
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Label, Select, TextArea
 
 from ome_zarr_tools.commands.config import read_config, target_config_path, write_config
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
+from ome_zarr_tools.tui.fields import FieldSpec, build_field_frames, build_identity_frame
+from ome_zarr_tools.tui.screens.result_screen import CommandResultScreen
 from ome_zarr_tools.tui.shortcuts import shared_bindings
 from ome_zarr_tools.tui.status import StatusPanel
 
@@ -45,8 +49,20 @@ def collect_default_values() -> dict[str, object]:
     return defaults
 
 
+class ConfigResultScreen(CommandResultScreen):
+    def __init__(self, command: click.Command, config_json: str) -> None:
+        super().__init__(command)
+        self.config_json = config_json
+
+    def compose_result_content(self) -> ComposeResult:
+        yield TextArea(self.config_json, language="json", read_only=True)
+
+
 class ConfigScreen(Screen[None]):
-    BINDINGS = [*shared_bindings(primary_label="Save")]
+    BINDINGS = [
+        *shared_bindings(primary_label="Save"),
+        Binding("f4", "restore_defaults", "Restore Defaults"),
+    ]
 
     DEFAULT_CSS = """
     #bottom-bar {
@@ -55,8 +71,9 @@ class ConfigScreen(Screen[None]):
     }
     """
 
-    def __init__(self) -> None:
+    def __init__(self, command: click.Command) -> None:
         super().__init__()
+        self.command = command
         self._scope_select: Select[str] = Select(
             [("user", "user"), ("project", "project")],
             value="user",
@@ -75,14 +92,21 @@ class ConfigScreen(Screen[None]):
         self._editor = TextArea("{}", language="json", id="editor")
         self._log_lines: list[str] = []
         self._status_panel = StatusPanel()
+        self._pending_result: ConfigResultScreen | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll():
-            yield Label("Scope")
-            yield self._scope_select
-            yield self._project_dir_label
-            yield self._project_dir_input
+            yield build_identity_frame(self.command)
+            field_specs = [
+                FieldSpec(label="Scope", widget=self._scope_select, required=False),
+                FieldSpec(
+                    label="",
+                    widget=Vertical(self._project_dir_label, self._project_dir_input),
+                    required=False,
+                ),
+            ]
+            yield from build_field_frames(field_specs)
             yield Label("Current preferences (this scope)")
             yield self._current_view
             yield Label("Built-in defaults (for comparison)")
@@ -137,34 +161,40 @@ class ConfigScreen(Screen[None]):
             self.notify("Config must be a JSON object.", severity="error")
             return
 
+        if self._pending_result is not None:
+            self.app.push_screen(self._pending_result)
+            return
+
         path = self._target_path()
+        config_json = json.dumps(parsed, indent=2)
 
         def _work() -> None:
             write_config(path, parsed)
 
-        self._status_panel.start()
+        result_screen = ConfigResultScreen(self.command, config_json)
+        self._pending_result = result_screen
+        self.app.push_screen(result_screen)
+        on_progress, on_log = result_screen.begin()
+
+        async def _on_done(result: ExecutionResult) -> None:
+            self._pending_result = None
+            if result.succeeded:
+                self._current_view.text = self._editor.text
+            await result_screen.finish(result)
+
         run_in_background(
             self.app,
             _work,
-            self._on_execution_done,
-            on_progress=self._status_panel.update_progress,
-            on_log=self._status_panel.append_log,
+            _on_done,
+            on_progress=on_progress,
+            on_log=on_log,
         )
-
-    def _on_execution_done(self, result: ExecutionResult) -> None:
-        self._status_panel.stop()
-        if result.succeeded:
-            self._current_view.text = self._editor.text
-            self._log_lines.append("config succeeded.")
-            self.notify("config succeeded.")
-        else:
-            self._log_lines.append(f"config failed: {result.error}")
-            self.notify(f"config failed: {result.error}", severity="error")
 
     def action_copy(self) -> None:
         invocation = self._invocation_text()
         self.app.copy_to_clipboard(invocation)
         self._log_lines.append(f"Copied: {invocation}")
+        self._status_panel.append_log(f"Copied: {invocation}")
         self.notify("Copied to clipboard (and logged).")
 
     def action_copy_and_exit(self) -> None:
@@ -173,6 +203,11 @@ class ConfigScreen(Screen[None]):
 
     def action_toggle_log(self) -> None:
         self._status_panel.toggle_log()
+
+    async def action_restore_defaults(self) -> None:
+        if self._pending_result is not None:
+            return
+        await self.app.switch_screen(ConfigScreen(self.command))
 
     def action_back(self) -> None:
         self.app.pop_screen()

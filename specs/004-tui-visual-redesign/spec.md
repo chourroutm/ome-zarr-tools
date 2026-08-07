@@ -8,6 +8,12 @@
 
 **Input**: User description: "the TUI is ugly, I want to pimp it a bit. Like in Toad, add a logo at the top; that logo can be Matriochka doll inspired in ASCII. In forms, reorder the fields whether they are required or optional, add frame boxes and edit case (the current case matches the CLI conventions, but that is not pretty). Also look at the Dolphie and Harlequin examples: https://textual.textualize.io/"
 
+## Clarifications
+
+### Session 2026-08-06
+
+- Q: When a field label is too long to fit the frame's width, should it wrap to a second line or truncate with an ellipsis? → A: Wrap to multiple lines — never hides label text, safer for a data-entry form than the compact single-line Toad/Dolphie aesthetic invoked elsewhere.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - A distinctive first impression (Priority: P1)
@@ -56,7 +62,12 @@ the specialized `fix_metadata`/`migrate`/`inspect`/`config` screens) and
 sees required fields grouped together, ahead of optional fields, each group
 inside its own titled, bordered frame — instead of today's single
 undifferentiated, unframed list in whatever order Click happened to declare
-the parameters.
+the parameters. The required-fields frame uses a tall red border, the
+optional-fields frame a tall blue border, so the two groups are
+distinguishable at a glance even before reading either title. The
+required-fields frame's subtitle also tells the user, at all times, how
+many of its fields are still empty — so they can tell they're done without
+scanning the whole frame.
 
 **Why this priority**: The second most concrete ask, and the highest-traffic
 screens in the app (every command's data-entry surface); framed,
@@ -66,18 +77,27 @@ panels to organize dense information without clutter.
 
 **Independent Test**: Open a form with a mix of required and optional
 fields (e.g. `from_images`); confirm all required fields appear inside one
-titled frame, ahead of all optional fields in a second titled frame.
+red-bordered frame, ahead of all optional fields in a second blue-bordered
+frame, and that the required frame's subtitle shows the correct
+still-empty count as fields are filled in.
 
 **Acceptance Scenarios**:
 
 1. **Given** a command form with both required and optional fields,
    **When** it renders, **Then** required fields appear together in one
-   bordered, titled frame, positioned before a second bordered, titled
-   frame containing the optional fields.
+   tall-red-bordered, titled frame, positioned before a second
+   tall-blue-bordered, titled frame containing the optional fields.
 2. **Given** a command form with only required fields (or only optional
    fields), **When** it renders, **Then** only the one relevant frame is
    shown — no empty frame for the other group.
-3. **Given** the user submits the form (Run/Copy/Copy & exit), **When** the
+3. **Given** the required-fields frame is shown, **When** the user views its
+   border subtitle, **Then** it states how many required fields are still
+   empty (e.g. "2 remaining"), and that count updates as the user fills in
+   or clears required fields.
+4. **Given** every required field has a value, **When** the user views the
+   required frame's subtitle, **Then** it reflects zero fields remaining
+   (e.g. "0 remaining") rather than being removed or left stale.
+5. **Given** the user submits the form (Run/Copy/Copy & exit), **When** the
    resulting CLI invocation is built, **Then** it is identical to what the
    pre-redesign field order would have produced — visual grouping does not
    change the underlying command.
@@ -205,14 +225,133 @@ confirm the scheme reappears as plain editable text in the input.
    field is in any add-on state, **Then** the Browse button remains to the
    right of the whole input group, unaffected.
 
+---
+
+### User Story 6 - Know what you're about to run (Priority: P6)
+
+A user opens any command's prep screen and sees, before any fields, a
+titled, bordered frame stating the command's name and its existing CLI
+description — the same identity already shown in the command menu — so
+they always have a clear, at-a-glance confirmation of which command they're
+configuring, even after scrolling past the header.
+
+**Why this priority**: Continues the "designed, not dumped" per-screen
+framing already established for field groups (User Story 2), applied to a
+piece of identity most useful at the very top of every form. Lower
+priority than the field frames themselves since it's a smaller, purely
+additive piece of chrome.
+
+**Independent Test**: Open any command's prep screen (generic or
+specialized) and confirm a titled frame at the top shows the command's
+name and description, sourced from the same text as its menu entry.
+
+**Acceptance Scenarios**:
+
+1. **Given** any command's prep screen, **When** it renders, **Then** a
+   bordered, titled frame appears above the field content containing the
+   command's name and its existing CLI description text.
+2. **Given** a command with no CLI help text, **When** its prep screen
+   renders, **Then** the frame still shows the command name, with the
+   description area rendering blank rather than an error (same precedent
+   as FR-002c).
+3. **Given** the command-identity frame and the required/optional
+   field-group frames (User Story 2) are both shown on the same screen,
+   **When** the user views it, **Then** the identity frame is visually
+   distinguishable from the field-group frames, so the different frame
+   types don't blur together.
+
+---
+
+### User Story 7 - A dedicated place to see what happened (Priority: P7)
+
+A user fills in a command's prep screen and presses Run. The app
+immediately takes them to that command's dedicated Command Result screen
+— it doesn't wait for the command to finish first. The Result screen
+opens showing the same command-identity frame (name + description) as the
+prep screen it came from, and, while the command is still running, a
+progress bar (once progress is quantifiable) or an animated sparkline
+(while it isn't yet) in place of the final content — the same status
+indicator this app already shows elsewhere, just relocated here. Once
+execution finishes — success or failure — that same screen swaps the
+progress indicator for the outcome: a clear success/failure indicator,
+the execution log, and that command's own specific output: `inspect`
+shows its summary/JSON report, `fix_metadata`/`migrate` show the diff
+that was applied, `config` shows the resulting config JSON, and every
+other command shows its captured execution output/log. From the Result
+screen, a clearly labeled shortcut takes the user back to that command's
+prep screen with its field values exactly as they were before Run.
+Separately, the prep screen itself gains a Restore Defaults shortcut that
+resets every field back to the values it opened with, for a clean restart
+without leaving the screen — achieved by reloading the prep screen itself
+rather than resetting each field individually.
+
+**Why this priority**: The least visually-driven of the new stories — it
+changes navigation/screen architecture, not just appearance — so it's
+sequenced after the purely visual stories.
+
+**Independent Test**: Run any command and confirm the app navigates to
+its Result screen immediately, showing a progress indicator; once the
+command finishes, confirm that same screen shows a success indicator and
+that command's specific output (or a failure indicator and the error, for
+a failing invocation). Separately, confirm a prep screen's Restore
+Defaults shortcut resets every field, and that a required field left
+empty still blocks Run without navigating anywhere.
+
+**Acceptance Scenarios**:
+
+1. **Given** a command's prep screen with all required fields filled,
+   **When** the user presses Run, **Then** the app immediately navigates
+   to that command's Result screen, which shows the command-identity
+   frame and a progress indicator (bar or sparkline) rather than waiting
+   for the command to finish before navigating.
+2. **Given** the Result screen is showing its progress indicator, **When**
+   the command finishes successfully, **Then** the progress indicator is
+   replaced by a success indicator, the execution log, and the command's
+   specific output.
+3. **Given** the same setup, **When** the command fails instead, **Then**
+   the progress indicator is replaced by a failure indicator and the
+   error message.
+4. **Given** a prep screen where a required field is empty, **When** the
+   user presses Run, **Then** the app does not navigate anywhere — the
+   existing inline "field is required" notification is unchanged, since
+   the command never actually executed.
+5. **Given** the Result screen for any command, in either the pending or
+   finished state, **When** the user triggers its return shortcut, **Then**
+   the app goes back to that command's prep screen with its field values
+   exactly as they were before Run.
+6. **Given** `inspect`'s Result screen once finished, **When** it renders,
+   **Then** it shows the same summary/JSON report panels the command
+   already produces.
+7. **Given** `fix_metadata`'s or `migrate`'s Result screen once finished,
+   **When** it renders, **Then** it shows the diff that was actually
+   applied.
+8. **Given** `config`'s Result screen once finished, **When** it renders,
+   **Then** it shows the resulting config JSON that was written.
+9. **Given** any command's prep screen with some fields edited away from
+   their opening values, **When** the user triggers Restore Defaults,
+   **Then** every field resets to the value it had when the screen first
+   opened (including a non-empty default, where one exists) — not
+   necessarily blank — by reloading the prep screen itself rather than
+   resetting each field individually.
+10. **Given** a run currently in progress, **When** the user is on that
+    command's prep screen (having navigated back mid-run, or before
+    navigation completes), **Then** Restore Defaults has no effect until
+    that run finishes, consistent with fields already being disabled for
+    the duration of a run.
+
 ### Edge Cases
 
 - What happens to a field label long enough to threaten the frame's width
-  (e.g. `voxel_size_unit` → "Voxel Size Unit")? It must wrap or truncate
-  without breaking the frame's border.
+  (e.g. `voxel_size_unit` → "Voxel Size Unit")? It must wrap to a second
+  line without breaking the frame's border, never truncating text away.
 - What happens on a command with zero optional fields, or zero required
   fields? Only the frame for the group that has fields is shown (User Story
-  2, Acceptance Scenario 2) — no empty frame.
+  2, Acceptance Scenario 2) — no empty frame, and so no remaining-count
+  subtitle either when there are no required fields to count.
+- What happens to the required frame's subtitle when a required field
+  starts pre-filled with a default value? It counts as filled from the
+  first render — the subtitle reflects truly empty fields, not fields the
+  user hasn't yet touched.
 - What happens to the logo on a terminal resize while the menu is open? It
   re-evaluates the same width/height rule (User Story 1, Acceptance
   Scenario 2) — appears/disappears consistently with the current size.
@@ -236,6 +375,33 @@ confirm the scheme reappears as plain editable text in the input.
   (e.g. `gs://`) with nothing after it? No add-on is shown yet — it stays a
   single editable input containing that text, consistent with the
   reversibility behavior in User Story 5, Acceptance Scenario 3.
+- What happens if the user returns to the prep screen while a run is
+  still pending (via the Result screen's return shortcut) and presses Run
+  again for that same command? The app does not start a second execution
+  — it re-navigates to that same still-pending Result screen, unchanged,
+  rather than cancelling the first run or opening a duplicate screen.
+- What happens if the user presses Cancel/Escape instead of Run? No
+  execution occurs, so there is nothing to navigate to — this exits the
+  app the same way it already does, unchanged by User Story 7.
+- What happens to the Command Identity Frame's title/description for a
+  specialized screen with no directly corresponding `click.Command` help
+  text at the point it's rendered? It uses that command's existing CLI
+  help text exactly as the command menu already does (User Story 6,
+  Acceptance Scenario 2) — never screen-specific wording.
+- What happens if the command finishes so quickly that the progress
+  indicator would barely be visible? The Result screen still opens
+  immediately on Run and briefly shows the pending state — there is no
+  minimum display duration, it swaps to the outcome as soon as the result
+  arrives.
+- What happens to Restore Defaults if the prep screen has no fields with
+  non-default values (nothing to reset)? The screen still reloads, but
+  since every field already shows its opening value, the visible result
+  is unchanged.
+- What happens to a specialized screen's other live content (e.g.
+  `fix_metadata`/`migrate`'s diff view, `config`'s current-vs-defaults
+  view) when Restore Defaults reloads the screen? It resets too, along
+  with the fields — reloading rebuilds the whole screen from scratch, the
+  same as opening it fresh from the menu, not just the input fields.
 
 ## Requirements *(mandatory)*
 
@@ -262,11 +428,20 @@ confirm the scheme reappears as plain editable text in the input.
 - **FR-004**: Required fields MUST be enclosed in one titled, bordered
   frame; optional fields MUST be enclosed in a separate titled, bordered
   frame. A group with no fields MUST NOT render an empty frame.
+- **FR-004a**: The required-fields frame MUST use a tall red border style;
+  the optional-fields frame MUST use a tall blue border style.
+- **FR-004b**: The required-fields frame's border subtitle MUST show the
+  count of required fields that are currently empty (e.g. "2 remaining"),
+  recomputed whenever a required field's value changes, including reaching
+  "0 remaining" when all are filled.
 - **FR-005**: Field labels MUST be rendered as capitalized, space-separated
   words derived from the parameter's name, instead of the raw CLI
   flag/argument name.
 - **FR-006**: The required-field marker MUST remain visible and legible
   alongside the new label casing and frame layout.
+- **FR-006a**: A field label too long to fit the frame's width MUST wrap
+  to a second line rather than truncating — no label text may be hidden
+  from the user, and the frame's border MUST NOT break as a result.
 - **FR-007**: Grouping fields into frames and relabeling them MUST NOT
   change the CLI tokens/invocation the form produces — Run, Copy, and Copy &
   exit MUST continue to use each field's original parameter name/flag,
@@ -313,6 +488,58 @@ confirm the scheme reappears as plain editable text in the input.
 - **FR-019**: A path field's Browse button (User Story 4), where present,
   MUST remain positioned to the right of the whole field (add-on + input),
   unaffected by whether the add-on is shown.
+- **FR-020**: Every command prep screen MUST display a bordered, titled
+  frame above its field content showing the command's name and its
+  existing CLI description text, sourced identically to the command
+  menu's entry (FR-002c) — never a separately maintained copy.
+- **FR-021**: The command-identity frame (FR-020) MUST be visually
+  distinguishable from the required/optional field-group frames (FR-004a)
+  by border style/color, so a screen showing both frame types does not
+  visually conflate them.
+- **FR-022**: Pressing Run, once all required fields are filled, MUST
+  immediately navigate to a dedicated Command Result screen for that
+  command — the app MUST NOT wait for the command to finish before
+  navigating.
+- **FR-022a**: The Command Result screen MUST display the same
+  command-identity frame (FR-020) as the prep screen it was opened from,
+  sourced the same way, for as long as the screen is shown.
+- **FR-022b**: While the command is still executing, the Command Result
+  screen MUST show a progress bar (once progress is quantifiable) or an
+  animated sparkline (while it isn't yet) in place of the outcome
+  content, using the same status-indicator behavior already established
+  for command screens.
+- **FR-022c**: Once the command finishes, whether it succeeds or fails,
+  the Command Result screen MUST replace the progress indicator with the
+  outcome — a success/failure indicator plus the content described in
+  FR-023/FR-024 — without requiring the user to take any action.
+- **FR-023**: Every Command Result screen MUST share one common base
+  implementation providing: the command-identity frame (FR-022a), the
+  pending-state progress indicator (FR-022b), a success/failure
+  indicator once finished, the execution log, and a shortcut back to that
+  command's prep screen with its field values preserved, available in
+  both the pending and finished state.
+- **FR-024**: Each command's Command Result screen MUST additionally
+  present, once finished, that command's own specific output: `inspect`'s
+  summary/JSON report, `fix_metadata`'s/`migrate`'s applied diff,
+  `config`'s resulting JSON, and the captured execution log for every
+  other command.
+- **FR-025**: Pressing Run while a required field is empty MUST NOT
+  trigger navigation to the Result screen — the existing inline
+  validation notification applies unchanged, since the command never
+  executes.
+- **FR-025a**: Pressing Run for a command whose Result screen is already
+  showing a pending (not-yet-finished) run MUST NOT start a second
+  execution — it MUST re-navigate to that same pending Result screen.
+- **FR-026**: Returning from the Result screen to the prep screen MUST NOT
+  alter any field's value from what it was immediately before Run, in
+  either the pending or finished state.
+- **FR-027**: Every command prep screen MUST provide a Restore Defaults
+  action that resets every field to the value it held when the screen was
+  first opened (its original default, or blank where there is none) — not
+  necessarily to an empty state — by reloading the prep screen rather than
+  resetting individual field values.
+- **FR-027a**: Restore Defaults MUST have no effect while the screen's
+  fields are disabled for the duration of a run.
 
 ### Key Entities
 
@@ -324,7 +551,9 @@ confirm the scheme reappears as plain editable text in the input.
   name, its existing CLI help text, and a blank spacing line.
 - **Field Group Frame**: A titled, bordered container holding either all of
   a form's required fields or all of its optional fields; omitted entirely
-  if that group is empty.
+  if that group is empty. The required frame uses a tall red border and a
+  subtitle showing its still-empty field count; the optional frame uses a
+  tall blue border.
 - **Field Label**: The human-readable, capitalized/space-separated text
   shown next to a field, derived from (but never altering) the underlying
   CLI parameter name.
@@ -337,6 +566,23 @@ confirm the scheme reappears as plain editable text in the input.
   `http://`/`https://`) shown to the left of a path field's input when its
   value starts with that scheme and has additional text after it; reverts
   to plain editable text (scheme included) when the remainder is emptied.
+- **Command Identity Frame**: A titled, bordered frame showing the
+  command's name and its existing CLI description text; shown at the top
+  of every prep screen above the field content, and reused unchanged at
+  the top of that command's Result screen; visually distinct from the
+  required/optional field-group frames.
+- **Command Result Screen**: The screen the app navigates to immediately
+  on Run (not after it finishes). One shared base class provides common
+  chrome (the Command Identity Frame, a pending-state progress
+  bar/sparkline, a success/failure indicator once finished, the execution
+  log, and a return shortcut back to the prep screen, preserved fields
+  intact); each command's own subclass adds its finished-state specific
+  output (report panels, diff, config JSON, or captured log).
+- **Restore Defaults**: A prep-screen action resetting every field to the
+  value it held when the screen first opened (its original default, or
+  blank), achieved by reloading the whole prep screen rather than
+  resetting individual field values; has no effect while fields are
+  disabled during a run.
 
 ## Success Criteria *(mandatory)*
 
@@ -349,7 +595,11 @@ confirm the scheme reappears as plain editable text in the input.
   behavior unchanged.
 - **SC-002**: 100% of command forms with a mix of required/optional fields
   show two frames (Required, Optional), with all required fields inside the
-  first and all optional fields inside the second.
+  first and all optional fields inside the second, the first in a tall red
+  border and the second in a tall blue border.
+- **SC-002a**: On every command form with at least one required field, the
+  required frame's subtitle always matches the true count of currently
+  empty required fields, verified after every field edit.
 - **SC-003**: 100% of field labels across every command form display as
   human-readable text with no raw CLI flag characters (`--`, leading `-`,
   underscores) visible.
@@ -371,6 +621,25 @@ confirm the scheme reappears as plain editable text in the input.
 - **SC-008**: The CLI token produced by a path field is unaffected by
   add-on rendering — byte-for-byte identical to the same value typed as
   plain text, for every value tested.
+- **SC-009**: 100% of command prep screens show a command-identity frame
+  with the correct command name and description, verified by screen
+  inspection.
+- **SC-010**: 100% of command runs, whether they succeed or fail, navigate
+  to that command's Result screen immediately on Run, and end there
+  showing the correct success/failure indicator once finished.
+- **SC-011**: Every command's Result screen shows that command's specific
+  output (report/diff/config JSON/log) with no cross-command mixing,
+  verified per command.
+- **SC-012**: Returning from the Result screen to the prep screen never
+  changes a field's value, verified across all command forms, from both
+  the pending and finished state.
+- **SC-013**: 100% of Result screens show a progress bar or animated
+  sparkline while their command is still executing, verified by screen
+  inspection during a run.
+- **SC-014**: 100% of Result screens show the same command-identity frame
+  content as their originating prep screen.
+- **SC-015**: 100% of command prep screens' Restore Defaults action resets
+  every field to its opening value, verified across all command forms.
 
 ## Assumptions
 
@@ -445,3 +714,67 @@ confirm the scheme reappears as plain editable text in the input.
   existing mechanism to turn it on/off as the value changes later. FR-016
   is new dynamic behavior, not a tweak to something that already reacts to
   keystrokes.
+- **Command Identity Frame styling**: distinct from the tall red/tall blue
+  field-group frames (User Story 2) so the three frame types read
+  differently at a glance; exact border style/color is a `/speckit-plan`
+  detail, not specified by the user.
+- **"Command result page" scope**: applied uniformly to every command,
+  including `inspect`/`fix_metadata`/`migrate`/`config`, which already
+  show rich preview content (report/diff/current-config) inline, live,
+  *before* Run is pressed. User Story 7 does not remove those existing
+  pre-run previews — it adds a post-run destination that shows the
+  actual, applied result (not just the preview) once execution finishes.
+- **Result screen navigation model**: implemented as `push_screen`, so
+  Back (`pop_screen`) returns to the exact prep-screen instance with its
+  field values intact — the same screen-stack pattern already used for
+  Menu → Prep navigation, rather than rebuilding the prep screen from
+  scratch or returning to the menu.
+- **Generic commands' result content**: `from_images`/`extract`/
+  `apply_mask` (and any future command without a specialized screen) show
+  their captured execution output/log as their command-specific Result
+  content, since they don't produce a report/diff/config object today.
+- **Progress indicator reuse**: FR-022b's progress bar/animated sparkline
+  is the same status-indicator behavior this app already has (spec 002 US5
+  — a progress bar once progress is quantifiable, an animated sparkline
+  before then), relocated onto the Result screen rather than reinvented;
+  the prep screen's own copy of that indicator is simply not driven for a
+  Run any more, since the user has already navigated away from it by the
+  time it would show anything.
+- **Return-shortcut label**: the user asked for a better name than
+  "return to command prep" for the Result screen's return-to-prep
+  shortcut. Named **"Back to form"** — short enough for the footer,
+  unambiguous about the destination (unlike the generic "Back to menu"
+  label every other screen's escape binding uses, which would be
+  literally inaccurate here since one press returns to the prep screen,
+  not the menu). This is a deliberate, scoped exception to
+  `shared_bindings()`'s existing "only the primary action's label may
+  vary" rule (`003`'s own contract) — the Result screen is the one screen
+  where the generic label would actively mislead.
+- **Restore Defaults' key binding**: `F4`, chosen because it's unused
+  today and sits immediately before Run (`F5`) in the footer's
+  left-to-right order, reading naturally as "Restore Defaults, then Run."
+  Unchanged from this feature's earlier "Clear" naming — only the label
+  and the reset mechanism changed, not the key.
+- **Restore Defaults resets to opening values, not blank**: some fields
+  have a meaningful non-empty default (e.g. `migrate`'s
+  `--target_version`); resetting those to empty would be less useful than
+  restoring what the screen showed on first open.
+- **Restore Defaults reloads the screen rather than resetting fields
+  individually**: per the user's explicit direction, implemented by
+  replacing the current prep screen with a freshly constructed instance
+  of the same screen class (Textual's `App.switch_screen()`, confirmed to
+  replace only the top of the screen stack without growing it) rather
+  than recording each field's opening value and writing it back — this
+  supersedes this feature's earlier per-field "record and restore"
+  design. A fresh instance recomputes every default through the exact
+  same code path used when the screen was first opened, so there is only
+  ever one source of truth for "what a field's default is," and it
+  naturally also resets non-field content (previews, diffs) for the
+  specialized screens as a side effect, not just input fields.
+- **Re-pressing Run against a pending Result screen**: rather than
+  starting a second execution (`execution.py`'s worker is already
+  `exclusive=True`, so a second call would silently cancel the first) or
+  doing nothing, the prep screen holds a reference to its in-flight
+  Result screen and re-navigates to it — the simplest option that can't
+  orphan a cancelled run's Result screen waiting forever for a result
+  that will never arrive.

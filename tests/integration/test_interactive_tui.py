@@ -5,6 +5,7 @@ from textual.widgets import Input, OptionList
 from ome_zarr_tools.cli import cli
 from ome_zarr_tools.commands.interactive import _prompt_tokens
 from ome_zarr_tools.tui.app import InteractiveTUIApp
+from ome_zarr_tools.tui.screens.result_screen import CommandResultScreen
 
 COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
 
@@ -66,11 +67,13 @@ async def test_select_edit_revisit_and_run_executes(
         assert volume_field.value == str(sample_ome_zarr)
         assert str(sample_ome_zarr) in app.screen._invocation_text()
 
-        form_screen = app.screen
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(form_screen._log_lines))
+        await pilot.pause()
+        result_screen = app.screen
+        assert isinstance(result_screen, CommandResultScreen)
+        await _wait_for(pilot, lambda: result_screen._finished)
 
-    assert any("succeeded" in line for line in form_screen._log_lines)
+    assert "succeeded" in str(result_screen._outcome_label.content)
 
 
 async def test_cancel_from_form_returns_to_menu_not_full_exit():
@@ -111,15 +114,18 @@ async def test_required_field_blocks_run_until_filled(monkeypatch, tmp_path: Pat
         form_screen = app.screen
         await pilot.press("f5")
         await pilot.pause()
-        assert form_screen._log_lines == []  # required zarr_path still empty; Run was a no-op
+        assert app.screen is form_screen  # required zarr_path still empty; Run was a no-op
 
         path_field = app.screen.query_one("#field-zarr_path", Input)
         path_field.focus()
         await pilot.press(*str(sample_ome_zarr))
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(form_screen._log_lines))
+        await pilot.pause()
+        result_screen = app.screen
+        assert isinstance(result_screen, CommandResultScreen)
+        await _wait_for(pilot, lambda: result_screen._finished)
 
-    assert any("succeeded" in line for line in form_screen._log_lines)
+    assert "succeeded" in str(result_screen._outcome_label.content)
 
 
 async def test_copy_does_not_run_and_copy_and_exit_closes_the_app(monkeypatch, tmp_path: Path):

@@ -17,8 +17,9 @@ back into per-screen one-offs (the same reasoning as `003`'s
 | Element | Rule |
 |---|---|
 | Order | Required frame before Optional frame. Empty group → that frame is omitted entirely. |
-| Border | `border: round $panel;` (or the app's equivalent border-color variable) — one style, reused everywhere a frame appears. |
+| Border | Required frame: `border: tall red;`. Optional frame: `border: tall blue;`. |
 | Title | `border_title = "Required"` / `"Optional"`, exact strings, so tests can assert on them. |
+| Subtitle | Required frame only: `border_subtitle = f"{n} remaining"`, `n` = count of required fields currently empty. Recomputed on every required-field value change, including reaching `"0 remaining"`. Optional frame: no subtitle. |
 
 ## Field labels (User Story 3)
 
@@ -55,23 +56,75 @@ back into per-screen one-offs (the same reasoning as `003`'s
 | Deleting the `Input`'s text to empty while an add-on is shown → add-on removed, `Input`'s text becomes the bare scheme string. |
 | CLI token = add-on's scheme text (if shown) + `Input`'s text, always — identical to the same full string typed into a plain field. |
 
+## Command identity frame (User Story 6)
+
+| Element | Rule |
+|---|---|
+| Placement | Yielded first in every prep screen's `compose()`, above the field content. |
+| Border | `border: round #d4af37;` — distinct from the field-group frames' tall red/tall blue. |
+| Title | `border_title = command.name`. |
+| Description | A `Label` inside the frame, `command.get_short_help_str(limit=70)` — same source as the menu entry's line 2 (FR-002c); blank, not an error, for a command with no help text. |
+
+## Command result screen (User Story 7)
+
+| Element | Rule |
+|---|---|
+| Trigger | Constructed and `push_screen()`-ed from `action_run()` *immediately* once required-field validation passes (FR-022) — not after the command finishes. Never constructed when Run is blocked by that validation (FR-025). A second Run press while that command's Result screen is still pending re-navigates to the existing instance rather than constructing a new one (FR-025a). |
+| Base class | `tui/screens/result_screen.py`'s `CommandResultScreen(Screen[None])` — yields the same `build_identity_frame(command)` as the prep screen (FR-022a), first, in both states. Pending state: an embedded `StatusPanel` (progress bar/sparkline, started via `begin()`). Finished state (after `finish(result)`): a success/failure `Label` + `compose_result_content()`'s output + the same `StatusPanel` (stopped, its log still toggleable). `BINDINGS` overrides `escape`'s label to "Back to form" by listing it before `*shared_bindings()` (same key, key/action unchanged, only the displayed label differs — verified empirically, see research.md). |
+| Subclass content | `compose_result_content()` override per command, shown only once finished: `GenericResultScreen` (from_images/extract/apply_mask) — none beyond the shared `StatusPanel` log; `InspectResultScreen` — summary/JSON report panels; `FixMetadataResultScreen`/`MigrateResultScreen` — the applied diff; `ConfigResultScreen` — the written config JSON. |
+| Back to form | Pops the Result screen off the stack, returning to the exact prep-screen instance beneath it with every field value unchanged, from either the pending or finished state (FR-026). |
+
+## Restore Defaults (User Story 7)
+
+| Element | Rule |
+|---|---|
+| Binding | `F4`, added to each prep screen's own `BINDINGS` alongside `shared_bindings()`. |
+| Behavior | `await self.app.switch_screen(type(self)(...))` — replaces the current prep screen with a freshly constructed instance of the same class, resetting every field (and any other live content) to what the screen showed on first open (FR-027). Not a per-field value write-back. |
+| Disabled state | No-op while fields are disabled for the duration of a run (FR-027a). |
+
 ## Who implements this contract
 
 - `tui/logo.py` — `Logo`, `LOGO`
 - `tui/app.py` — `CommandMenuScreen` (menu entries, logo),
-  `CommandFormScreen` (frames, labels, add-on, browse — via `fields.py`)
-- `tui/fields.py` — `FieldSpec`, `build_field_frames`, `field_label`,
-  `REMOTE_SCHEME_COLORS`, add-on `Horizontal` composition, Browse button
+  `CommandFormScreen` (frames, labels, add-on, browse, identity frame,
+  `action_restore_defaults()` — via `fields.py`; `action_run()` pushes
+  `GenericResultScreen` immediately and drives it via `begin()`/`finish()`)
+- `tui/fields.py` — `FieldSpec`, `build_field_frames`, `build_identity_frame`,
+  `field_label`, `REMOTE_SCHEME_COLORS`, add-on `Horizontal` composition,
+  Browse button
 - `tui/screens/browse_screen.py` — `BrowsePickerScreen`, `SafeDirectoryTree`
+- `tui/screens/result_screen.py` — `CommandResultScreen` (base: identity
+  frame, `StatusPanel`-driven pending/finished states, `begin()`/
+  `finish()`, "Back to form" binding override), `GenericResultScreen`
 - `tui/screens/inspect_screen.py`, `metadata_screen.py`, `config_screen.py`
   — each screen's own `FieldSpec` list + `build_field_frames()` call,
-  human-readable labels
+  human-readable labels, identity frame, `action_restore_defaults()`,
+  and its `CommandResultScreen` subclass (`InspectResultScreen`,
+  `FixMetadataResultScreen`, `MigrateResultScreen`, `ConfigResultScreen`)
+- `tui/status.py` — `StatusPanel`, reused unchanged (no new methods needed)
 
 ## Who verifies this contract
 
 New/updated tests in `tests/integration/`: a static test asserting every
 per-command screen's rendered field order/frame membership matches the
-required/optional table above; a menu-entry test asserting `Option.prompt`
-line count and content; a Browse round-trip test using `ModalScreen`
-push/dismiss; an add-on state-machine test exercising type/backspace
-sequences for all 4 color groups.
+required/optional table above, including each frame's border style/color;
+a dynamic test asserting the required frame's `border_subtitle` starts at
+the correct initial count, updates on each required-field edit, and reads
+`"0 remaining"` once all are filled; a menu-entry test asserting
+`Option.prompt` line count and content; a Browse round-trip test using
+`ModalScreen` push/dismiss; an add-on state-machine test exercising
+type/backspace sequences for all 4 color groups; a static test asserting
+every prep screen's identity frame shows the correct name/description; a
+dynamic test asserting `app.screen` becomes the correct `CommandResultScreen`
+subclass *immediately* on Run (before the worker resolves) showing the
+identity frame and a pending progress indicator, that it flips to the
+correct success/failure indicator and command-specific content once the
+worker resolves, that a blocked Run (missing required field) never
+navigates, that a second Run press while pending re-navigates to the same
+instance rather than constructing a new one, and that "Back to form"
+returns to the prep screen with fields unchanged from either state; a
+dynamic test asserting Restore Defaults replaces the prep screen with a
+fresh instance (`app.screen is not` the pre-reload screen) whose fields
+show their opening values (including non-empty defaults) and whose
+specialized-screen content (diff/current-config views) is likewise reset,
+and that it's a no-op while fields are disabled.

@@ -1,4 +1,6 @@
-"""T023/T026: specialized screens for `inspect` (US6) and `config` (US7)."""
+"""T023/T026: specialized screens for `inspect` and `config`, plus their Result screens
+(spec 004 US7 moved the always-post-Run content -- report panels, written config JSON --
+off the prep screen and onto each command's own Result screen)."""
 
 from __future__ import annotations
 
@@ -8,23 +10,26 @@ from pathlib import Path
 from textual.app import App
 from textual.widgets import Input, TextArea
 
+from ome_zarr_tools.cli import cli
 from ome_zarr_tools.commands.config import read_config, target_config_path
 from ome_zarr_tools.commands.inspect import build_report
-from ome_zarr_tools.tui.screens.config_screen import ConfigScreen
-from ome_zarr_tools.tui.screens.inspect_screen import InspectScreen
+from ome_zarr_tools.tui.screens.config_screen import ConfigResultScreen, ConfigScreen
+from ome_zarr_tools.tui.screens.inspect_screen import InspectResultScreen, InspectScreen
+
+COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
 
 
 class _InspectApp(App):
     def on_mount(self) -> None:
-        self.push_screen(InspectScreen())
+        self.push_screen(InspectScreen(COMMANDS["inspect"]))
 
 
 class _ConfigApp(App):
     def on_mount(self) -> None:
-        self.push_screen(ConfigScreen())
+        self.push_screen(ConfigScreen(COMMANDS["config"]))
 
 
-async def _wait_for(pilot, predicate, attempts: int = 50) -> None:
+async def _wait_for(pilot, predicate, attempts: int = 50) -> None:  # noqa: ANN001
     for _ in range(attempts):
         if predicate():
             return
@@ -32,12 +37,10 @@ async def _wait_for(pilot, predicate, attempts: int = 50) -> None:
 
 
 async def test_inspect_screen_panels_match_build_report_after_run(sample_ome_zarr):
-    """T023: pressing Run builds the JSON-per-level and summary panels from build_report.
-
-    Nothing is built just from typing the path -- inspect is no longer live
-    (a remote gs://\\s3:// path would otherwise fire one network call per
-    keystroke); only Run (F5) triggers a build.
-    """
+    """T023: pressing Run builds the JSON-per-level and summary panels (from
+    build_report) on the Result screen -- nothing is built just from typing the
+    path (inspect is no longer live; a remote gs://\\s3:// path would otherwise
+    fire one network call per keystroke)."""
     expected = build_report(str(sample_ome_zarr))
 
     app = _InspectApp()
@@ -49,18 +52,20 @@ async def test_inspect_screen_panels_match_build_report_after_run(sample_ome_zar
         await pilot.press(*str(sample_ome_zarr))
         await pilot.pause()
 
-        # Typing alone must not have built anything yet.
-        assert screen._report is None
-        assert screen._log_lines == []
+        # Typing alone must not have built anything, or navigated, yet.
+        assert isinstance(app.screen, InspectScreen)
 
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(screen._log_lines))
+        await pilot.pause()
+        assert isinstance(app.screen, InspectResultScreen)
+        result_screen = app.screen
+        await _wait_for(pilot, lambda: result_screen._finished)
 
         for level in expected["levels"]:
-            panel = screen.query_one(f"#json-level-{level['path']}", TextArea)
+            panel = result_screen.query_one(f"#json-level-{level['path']}", TextArea)
             assert json.loads(panel.text) == level
 
-        summary = screen.query_one("#summary-view", TextArea)
+        summary = result_screen.query_one("#summary-view", TextArea)
         assert str(expected["total_stored_bytes"]) in summary.text
         assert str(expected["total_logical_bytes"]) in summary.text
         for level in expected["levels"]:
@@ -68,61 +73,37 @@ async def test_inspect_screen_panels_match_build_report_after_run(sample_ome_zar
             assert str(tuple(level["chunk_shape"])) in summary.text
 
 
-async def test_inspect_screen_run_twice_does_not_crash_on_duplicate_ids(sample_ome_zarr):
-    """Regression: re-running must remove the old per-level panels before mounting new ones.
-
-    ``remove_children()`` is async; firing the re-mount before it actually
-    completed raised ``DuplicateIds`` on the second Run.
-    """
+async def test_inspect_screen_run_twice_in_a_row_does_not_crash(sample_ome_zarr):
+    """Regression: Run -> Back to form -> Run again must produce two independently
+    correct Result screens, not crash on duplicate widget IDs."""
     app = _InspectApp()
     async with app.run_test() as pilot:
         await pilot.pause()
-        screen = app.screen
-        path_input = screen.query_one("#field-zarr_path", Input)
+        prep_screen = app.screen
+        path_input = prep_screen.query_one("#field-zarr_path", Input)
         path_input.focus()
         await pilot.press(*str(sample_ome_zarr))
         await pilot.pause()
 
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(screen._log_lines))
-        assert len(screen._log_lines) == 1
+        await pilot.pause()
+        first_result = app.screen
+        await _wait_for(pilot, lambda: first_result._finished)
+        assert "succeeded" in str(first_result._outcome_label.content)
+
+        await pilot.press("escape")  # Back to form
+        await pilot.pause()
+        assert app.screen is prep_screen
 
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: len(screen._log_lines) > 1)
+        await pilot.pause()
+        second_result = app.screen
+        assert second_result is not first_result
+        await _wait_for(pilot, lambda: second_result._finished)
+        assert "succeeded" in str(second_result._outcome_label.content)
 
-        assert all("succeeded" in line for line in screen._log_lines)
-        panel = screen.query_one("#json-level-0", TextArea)
+        panel = second_result.query_one("#json-level-0", TextArea)
         assert json.loads(panel.text)["path"] == "0"
-
-
-async def test_inspect_screen_switches_between_summary_and_json_panels(sample_ome_zarr):
-    """T023: a keyboard shortcut switches between the two panels (tabbed, not simultaneous)."""
-    app = _InspectApp()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        screen = app.screen
-        path_input = screen.query_one("#field-zarr_path", Input)
-        path_input.focus()
-        await pilot.press(*str(sample_ome_zarr))
-        await pilot.pause()
-        await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(screen._log_lines))
-
-        summary = screen.query_one("#summary-view", TextArea)
-        json_panels = screen.query_one("#json-panels")
-
-        assert summary.display is True
-        assert json_panels.display is False
-
-        await pilot.press("f9")
-        await pilot.pause()
-        assert summary.display is False
-        assert json_panels.display is True
-
-        await pilot.press("f9")
-        await pilot.pause()
-        assert summary.display is True
-        assert json_panels.display is False
 
 
 async def test_inspect_screen_run_executes_the_real_cli_command(sample_ome_zarr):
@@ -136,9 +117,12 @@ async def test_inspect_screen_run_executes_the_real_cli_command(sample_ome_zarr)
         await pilot.pause()
 
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(screen._log_lines))
+        await pilot.pause()
+        result_screen = app.screen
+        assert isinstance(result_screen, InspectResultScreen)
+        await _wait_for(pilot, lambda: result_screen._finished)
 
-    assert any("succeeded" in line for line in screen._log_lines)
+    assert "succeeded" in str(result_screen._outcome_label.content)
 
 
 async def test_config_screen_current_and_defaults_match_scope(monkeypatch, tmp_path: Path):
@@ -175,30 +159,40 @@ async def test_config_screen_current_and_defaults_match_scope(monkeypatch, tmp_p
 async def test_config_screen_save_reproduces_config_set_and_blocks_invalid_json(
     monkeypatch, tmp_path: Path
 ):
-    """T026: valid JSON save reproduces `config set`'s write; invalid JSON blocks it, edit kept."""
+    """T026: valid JSON save reproduces `config set`'s write, navigating to the Result
+    screen; invalid JSON blocks it -- no navigation, edit kept verbatim."""
     monkeypatch.setenv("HOME", str(tmp_path))
 
     app = _ConfigApp()
     async with app.run_test() as pilot:
         await pilot.pause()
-        screen = app.screen
-        editor = screen.query_one("#editor", TextArea)
+        prep_screen = app.screen
+        editor = prep_screen.query_one("#editor", TextArea)
 
         editor.text = json.dumps({"compression": "zstd"}, indent=2)
         await pilot.pause()
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(screen._log_lines))
+        await pilot.pause()
+
+        assert isinstance(app.screen, ConfigResultScreen)
+        result_screen = app.screen
+        await _wait_for(pilot, lambda: result_screen._finished)
 
         target_path = target_config_path(True, None)
         assert read_config(target_path) == {"compression": "zstd"}
-        assert any("succeeded" in line for line in screen._log_lines)
+        assert "succeeded" in str(result_screen._outcome_label.content)
+        assert json.loads(result_screen.config_json) == {"compression": "zstd"}
+
+        await pilot.press("escape")  # Back to form
+        await pilot.pause()
+        assert app.screen is prep_screen
 
         editor.text = "{not valid json"
         await pilot.pause()
         await pilot.press("f5")
         await pilot.pause()
 
-        # Blocked: no new log entry, file on disk unchanged, edit preserved verbatim.
-        assert not any("succeeded" in line for line in screen._log_lines[1:])
+        # Blocked: no navigation, file on disk unchanged, edit preserved verbatim.
+        assert app.screen is prep_screen
         assert read_config(target_path) == {"compression": "zstd"}
         assert editor.text == "{not valid json"

@@ -1,4 +1,13 @@
-"""T018/T019: live status indicator and log-toggle behavior (User Story 5)."""
+"""T018/T019: live status indicator and log-toggle behavior (User Story 5).
+
+Spec 004 US7 relocated this progress/log display from the prep screen to the
+Command Result screen it navigates to on Run -- these tests patch
+``StatusPanel`` at the class level (rather than grabbing a specific instance
+via ``query_one``) since the Result screen's own ``StatusPanel`` instance
+doesn't exist until *after* Run is pressed, and the callables `begin()` hands
+to `run_command` are already-bound references by the time the test could
+otherwise intercept them.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +19,7 @@ from textual.widgets import Input, OptionList
 
 from ome_zarr_tools.cli import cli
 from ome_zarr_tools.tui.app import InteractiveTUIApp
+from ome_zarr_tools.tui.screens.result_screen import CommandResultScreen
 from ome_zarr_tools.tui.status import StatusPanel
 
 COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
@@ -19,7 +29,7 @@ def _menu_index(name: str) -> int:
     return sorted(COMMANDS).index(name)
 
 
-async def _wait_for(pilot, predicate, attempts: int = 100) -> None:
+async def _wait_for(pilot, predicate, attempts: int = 100) -> None:  # noqa: ANN001
     for _ in range(attempts):
         if predicate():
             return
@@ -67,8 +77,18 @@ async def test_status_panel_hidden_until_start_then_hidden_again_after_stop():
 async def test_dask_backed_command_status_transitions_to_quantified_progress(
     monkeypatch, tmp_path: Path, sample_ome_zarr, sample_mask_zarr
 ):
-    """T018: apply_mask drives real dask work; status must switch Sparkline -> ProgressBar."""
+    """T018: apply_mask drives real dask work; the Result screen's status must switch
+    Sparkline -> ProgressBar."""
     monkeypatch.chdir(tmp_path)
+
+    progress_updates: list[tuple[int, int]] = []
+    real_update_progress = StatusPanel.update_progress
+
+    def spy_update_progress(self, done: int, total: int) -> None:  # noqa: ANN001
+        progress_updates.append((done, total))
+        real_update_progress(self, done, total)
+
+    monkeypatch.setattr(StatusPanel, "update_progress", spy_update_progress)
 
     app = InteractiveTUIApp(COMMANDS)
     async with app.run_test() as pilot:
@@ -78,32 +98,19 @@ async def test_dask_backed_command_status_transitions_to_quantified_progress(
         await pilot.press("enter")
         await pilot.pause()
 
-        form_screen = app.screen
-        status_panel = form_screen.query_one(StatusPanel)
-        assert status_panel._quantified is False
-
-        # Spy on update_progress: dask task graphs can contain already-resolved
-        # keys that never fire `posttask`, so `done` isn't guaranteed to reach
-        # `total` exactly (verified directly against apply_mask's real graph) --
-        # what matters is that real, increasing progress was observed.
-        progress_updates: list[tuple[int, int]] = []
-        real_update_progress = status_panel.update_progress
-
-        def spy_update_progress(done: int, total: int) -> None:
-            progress_updates.append((done, total))
-            real_update_progress(done, total)
-
-        status_panel.update_progress = spy_update_progress  # type: ignore[method-assign]
-
         app.screen.query_one("#field-volume", Input).focus()
         await pilot.press(*str(sample_ome_zarr))
         app.screen.query_one("#field-mask", Input).focus()
         await pilot.press(*str(sample_mask_zarr))
         await pilot.pause()
 
-        assert status_panel._sparkline.display is False  # hidden until Run is pressed
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(form_screen._log_lines))
+        await pilot.pause()
+        result_screen = app.screen
+        assert isinstance(result_screen, CommandResultScreen)
+        status_panel = result_screen._status_panel
+
+        await _wait_for(pilot, lambda: result_screen._finished)
 
         assert len(progress_updates) > 1  # more than just the initial (0, total)
         totals = {total for _, total in progress_updates}
@@ -115,7 +122,7 @@ async def test_dask_backed_command_status_transitions_to_quantified_progress(
         # Status hides again once the run finishes, whether it was quantified or not.
         assert status_panel._sparkline.display is False
         assert status_panel._progress.display is False
-    assert any("succeeded" in line for line in form_screen._log_lines)
+        assert "succeeded" in str(result_screen._outcome_label.content)
 
 
 async def test_non_dask_command_status_stays_indeterminate(
@@ -124,6 +131,15 @@ async def test_non_dask_command_status_stays_indeterminate(
     """T018: inspect has no dask task graph; status must never quantify, always indeterminate."""
     monkeypatch.chdir(tmp_path)
 
+    progress_updates: list[tuple[int, int]] = []
+    real_update_progress = StatusPanel.update_progress
+
+    def spy_update_progress(self, done: int, total: int) -> None:  # noqa: ANN001
+        progress_updates.append((done, total))
+        real_update_progress(self, done, total)
+
+    monkeypatch.setattr(StatusPanel, "update_progress", spy_update_progress)
+
     app = InteractiveTUIApp(COMMANDS)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -132,35 +148,40 @@ async def test_non_dask_command_status_stays_indeterminate(
         await pilot.press("enter")
         await pilot.pause()
 
-        form_screen = app.screen
-        status_panel = form_screen.query_one(StatusPanel)
-        progress_updates: list[tuple[int, int]] = []
-        real_update_progress = status_panel.update_progress
-        status_panel.update_progress = lambda done, total: (  # type: ignore[method-assign]
-            progress_updates.append((done, total)),
-            real_update_progress(done, total),
-        )[1]
-
         app.screen.query_one("#field-zarr_path", Input).focus()
         await pilot.press(*str(sample_ome_zarr))
         await pilot.pause()
 
-        assert status_panel._sparkline.display is False  # hidden until Run is pressed
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(form_screen._log_lines))
+        await pilot.pause()
+        result_screen = app.screen
+        assert isinstance(result_screen, CommandResultScreen)
+        status_panel = result_screen._status_panel
+
+        await _wait_for(pilot, lambda: result_screen._finished)
 
         assert progress_updates == []  # no dask work -> never quantified
         # Status hides again once the run finishes.
         assert status_panel._progress.display is False
         assert status_panel._sparkline.display is False
-    assert any("succeeded" in line for line in form_screen._log_lines)
+        assert "succeeded" in str(result_screen._outcome_label.content)
 
 
 async def test_log_toggle_does_not_pause_or_clear_captured_lines(
     monkeypatch, tmp_path: Path, sample_ome_zarr
 ):
-    """T019: F8 toggling the RichLog must not pause capture or clear already-captured lines."""
+    """T019: F8 toggling the Result screen's RichLog must not pause capture or clear
+    already-captured lines."""
     monkeypatch.chdir(tmp_path)
+
+    captured: list[str] = []
+    real_append_log = StatusPanel.append_log
+
+    def spy_append_log(self, line: str) -> None:  # noqa: ANN001
+        captured.append(line)
+        real_append_log(self, line)
+
+    monkeypatch.setattr(StatusPanel, "append_log", spy_append_log)
 
     app = InteractiveTUIApp(COMMANDS)
     async with app.run_test() as pilot:
@@ -170,23 +191,22 @@ async def test_log_toggle_does_not_pause_or_clear_captured_lines(
         await pilot.press("enter")
         await pilot.pause()
 
-        form_screen = app.screen
-        status_panel = form_screen.query_one(StatusPanel)
-        captured: list[str] = []
-        real_append_log = status_panel.append_log
-        status_panel.append_log = lambda line: (captured.append(line), real_append_log(line))[1]  # type: ignore[method-assign]
-
         app.screen.query_one("#field-zarr_path", Input).focus()
         await pilot.press(*str(sample_ome_zarr))
         await pilot.pause()
 
+        await pilot.press("f5")
+        await pilot.pause()
+        result_screen = app.screen
+        assert isinstance(result_screen, CommandResultScreen)
+        status_panel = result_screen._status_panel
+
         assert status_panel._log.display is False
-        await pilot.press("f8")  # show the log before the run starts
+        await pilot.press("f8")  # show the log
         await pilot.pause()
         assert status_panel._log.display is True
 
-        await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(form_screen._log_lines))
+        await _wait_for(pilot, lambda: result_screen._finished)
         lines_after_run = list(captured)
         assert lines_after_run  # inspect's click.echo output was actually captured
 
@@ -211,6 +231,15 @@ async def test_captured_log_lines_match_direct_cli_output(
     assert cli_result.exit_code == 0
     expected_text = cli_result.output.rstrip("\n")
 
+    captured: list[str] = []
+    real_append_log = StatusPanel.append_log
+
+    def spy_append_log(self, line: str) -> None:  # noqa: ANN001
+        captured.append(line)
+        real_append_log(self, line)
+
+    monkeypatch.setattr(StatusPanel, "append_log", spy_append_log)
+
     app = InteractiveTUIApp(COMMANDS)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -219,17 +248,15 @@ async def test_captured_log_lines_match_direct_cli_output(
         await pilot.press("enter")
         await pilot.pause()
 
-        form_screen = app.screen
-        status_panel = form_screen.query_one(StatusPanel)
-        captured: list[str] = []
-        real_append_log = status_panel.append_log
-        status_panel.append_log = lambda line: (captured.append(line), real_append_log(line))[1]  # type: ignore[method-assign]
-
         app.screen.query_one("#field-zarr_path", Input).focus()
         await pilot.press(*str(sample_ome_zarr))
         await pilot.pause()
 
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(form_screen._log_lines))
+        await pilot.pause()
+        result_screen = app.screen
+        assert isinstance(result_screen, CommandResultScreen)
+
+        await _wait_for(pilot, lambda: result_screen._finished)
 
     assert "\n".join(captured) == expected_text

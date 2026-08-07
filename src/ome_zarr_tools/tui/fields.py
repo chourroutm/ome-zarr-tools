@@ -1,17 +1,38 @@
-"""``click.Parameter`` -> Textual widget mapping for the Command Form screen.
+"""``click.Parameter`` -> Textual widget mapping for command prep screens.
 
 Mirrors ``commands/interactive.py``'s ``_prompt_tokens`` branching (one rule per
 parameter kind) so the TUI and the prompt-based wizard build the same CLI tokens
 from equivalent answers -- see contracts/tui-contract.md § Widget mapping.
+
+Spec 004 additions: ``FieldSpec``/``build_field_frames()`` (required/optional
+framing, US2), human-readable ``field_label()`` (US3), ``PathField`` (Browse
+button + remote-scheme add-on, US4/US5), ``build_identity_frame()`` (US6).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import click
-from textual.widgets import Checkbox, Input, Select
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.widget import Widget
+from textual.widgets import Button, Checkbox, Input, Label, Select
 from textual_autocomplete import DropdownItem, PathAutoComplete, TargetState
+
+from ome_zarr_tools.core.zarr_path import is_remote_path
+
+REMOTE_SCHEME_COLORS: dict[str, str] = {
+    "gs://": "blue",
+    "gcs://": "blue",
+    "s3://": "orange",
+    "az://": "cyan",
+    "abfs://": "cyan",
+    "http://": "gray",
+    "https://": "gray",
+}
 
 
 class SafePathAutoComplete(PathAutoComplete):
@@ -23,7 +44,22 @@ class SafePathAutoComplete(PathAutoComplete):
     the whole app on a shared multi-user filesystem. Skip that directory's
     suggestions instead of crashing (FR-007: a field with no suggestions must not
     block the user).
+
+    ``suppressed`` (spec 004 US5/FR-016) forces the dropdown hidden regardless of
+    search results -- overriding ``should_show_dropdown()`` directly rather than
+    toggling ``.display``/`.disabled`` externally, since the base class's own
+    ``_handle_target_update()`` reactively toggles ``.display`` on every keystroke
+    based on search results and would otherwise fight over the same property.
     """
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self.suppressed = False
+
+    def should_show_dropdown(self, search_string: str) -> bool:
+        if self.suppressed:
+            return False
+        return super().should_show_dropdown(search_string)
 
     def get_candidates(self, target_state: TargetState) -> list[DropdownItem]:
         try:
@@ -41,10 +77,18 @@ def is_path_param(param: click.Parameter) -> bool:
 
 
 def field_label(param: click.Parameter) -> str:
-    if isinstance(param, click.Argument):
-        return param.human_readable_name
-    assert isinstance(param, click.Option)
-    return param.opts[0]
+    """Human-readable label (spec 004 FR-005): capitalized, space-separated words."""
+    return param.name.replace("_", " ").title()
+
+
+def _path_only(param: click.Parameter) -> Literal["dir", "file", "any"]:
+    ptype = param.type
+    assert isinstance(ptype, click.Path)
+    if ptype.dir_okay and not ptype.file_okay:
+        return "dir"
+    if ptype.file_okay and not ptype.dir_okay:
+        return "file"
+    return "any"
 
 
 def build_field_widget(param: click.Parameter) -> Checkbox | Select | Input:
@@ -91,10 +135,149 @@ def build_autocomplete(
     return SafePathAutoComplete(widget, path=root, id=f"{widget.id}-autocomplete")
 
 
-def widget_value_to_tokens(param: click.Parameter, widget: Checkbox | Select | Input) -> list[str]:
+class PathField(Horizontal):
+    """A path-typed field: optional remote-scheme add-on + Input + Browse button.
+
+    Reacts to its own ``Input``'s value: shows a colored, non-editable scheme
+    add-on when the value starts with a recognized remote scheme followed by
+    more text (US5, FR-014/FR-015); the add-on reverts to plain editable text
+    when the remainder is emptied (FR-017). Local autocomplete is hidden
+    whenever the value is remote-recognized, bare scheme included (FR-016).
+    Browse (US4, FR-008/FR-009) always stays to the right of the whole group
+    (FR-019).
+    """
+
+    DEFAULT_CSS = """
+    PathField {
+        height: auto;
+    }
+    PathField > .path-field-addon {
+        width: auto;
+        padding: 0 1;
+        text-style: bold;
+    }
+    PathField > Input {
+        width: 1fr;
+    }
+    PathField > Button {
+        height: 3;
+        width: auto;
+    }
+    """
+
+    def __init__(
+        self,
+        input_widget: Input,
+        *,
+        autocomplete: SafePathAutoComplete | None = None,
+        only: Literal["dir", "file", "any"] = "any",
+        id: str | None = None,  # noqa: A002
+    ) -> None:
+        super().__init__(id=id)
+        self.input = input_widget
+        self.autocomplete = autocomplete
+        self.only = only
+        self._addon_scheme: str | None = None
+        self._addon_label = Label("", classes="path-field-addon")
+        self._addon_label.display = False
+        self._browse_button = Button("Browse", classes="browse-button")
+
+    def compose(self) -> ComposeResult:
+        yield self._addon_label
+        yield self.input
+        yield self._browse_button
+
+    def on_mount(self) -> None:
+        self._sync_addon_state()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input is self.input:
+            self._sync_addon_state()
+
+    def _sync_addon_state(self) -> None:
+        if self._addon_scheme is not None:
+            if self.input.value == "":
+                scheme = self._addon_scheme
+                self._addon_scheme = None
+                self._addon_label.display = False
+                self.input.value = scheme
+                self.input.cursor_position = len(scheme)
+            return
+
+        value = self.input.value
+        for scheme, color in REMOTE_SCHEME_COLORS.items():
+            if value.startswith(scheme):
+                remainder = value[len(scheme) :]
+                if remainder:
+                    self._addon_scheme = scheme
+                    self._addon_label.update(scheme)
+                    self._addon_label.styles.color = color
+                    self._addon_label.display = True
+                    self.input.value = remainder
+                    self.input.cursor_position = len(remainder)
+                if self.autocomplete is not None:
+                    self.autocomplete.suppressed = True
+                    self.autocomplete.action_hide()
+                return
+
+        if self.autocomplete is not None:
+            self.autocomplete.suppressed = False
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button is not self._browse_button:
+            return
+        event.stop()
+        from ome_zarr_tools.tui.screens.browse_screen import BrowsePickerScreen
+
+        current = self.value
+        root = Path(current).parent if current and not is_remote_path(current) else Path(".")
+        if not root.is_dir():
+            root = Path(".")
+        self.app.push_screen(BrowsePickerScreen(root, self.only), self._apply_browse_result)
+
+    def _apply_browse_result(self, path: Path | None) -> None:
+        if path is None:
+            return
+        self._addon_scheme = None
+        self._addon_label.display = False
+        self.input.value = str(path)
+        self.input.cursor_position = len(str(path))
+
+    @property
+    def value(self) -> str:
+        """Full value including any add-on scheme prefix (FR-018)."""
+        if self._addon_scheme is not None:
+            return self._addon_scheme + self.input.value
+        return self.input.value
+
+
+AnyFieldWidget = Checkbox | Select | Input | PathField | Vertical
+
+
+def build_field_spec(param: click.Parameter) -> FieldSpec:
+    """Build the complete `FieldSpec` for one `click.Parameter`, including Browse/add-on
+    wrapping for path fields."""
+    label = field_label(param)
+    required = is_required(param)
+    widget = build_field_widget(param)
+    autocomplete = build_autocomplete(param, widget)
+
+    if is_path_param(param):
+        assert isinstance(widget, Input)
+        path_field = PathField(
+            widget, autocomplete=autocomplete, only=_path_only(param), id=f"{widget.id}-pathfield"
+        )
+        return FieldSpec(
+            label=label, widget=path_field, required=required, autocomplete=autocomplete
+        )
+
+    return FieldSpec(label=label, widget=widget, required=required, autocomplete=autocomplete)
+
+
+def widget_value_to_tokens(param: click.Parameter, widget: AnyFieldWidget) -> list[str]:
     """Convert one field widget's current value into the CLI tokens it represents."""
     if isinstance(param, click.Argument):
-        assert isinstance(widget, Input)
+        assert isinstance(widget, (Input, PathField))
         value = widget.value.strip()
         return [value] if value else []
 
@@ -112,7 +295,7 @@ def widget_value_to_tokens(param: click.Parameter, widget: Checkbox | Select | I
             return []
         return [flag, str(select_value)]
 
-    assert isinstance(widget, Input)
+    assert isinstance(widget, (Input, PathField))
     raw = widget.value.strip()
     if not raw:
         return []
@@ -130,3 +313,78 @@ def widget_value_to_tokens(param: click.Parameter, widget: Checkbox | Select | I
         return [flag, *parts]
 
     return [flag, raw]
+
+
+@dataclass
+class FieldSpec:
+    """One form field's presentation: label, widget, whether it's required, and its
+    optional autocomplete companion (spec 004 US2)."""
+
+    label: str
+    widget: AnyFieldWidget
+    required: bool
+    autocomplete: SafePathAutoComplete | None = None
+
+
+def _field_is_empty(widget: AnyFieldWidget) -> bool:
+    if isinstance(widget, (Input, PathField)):
+        return not widget.value.strip()
+    if isinstance(widget, Select):
+        return widget.value is Select.BLANK or widget.value in (None, "")
+    if isinstance(widget, Checkbox):
+        return False  # a boolean flag is never "empty"
+    return False
+
+
+def count_empty_required(specs: list[FieldSpec]) -> int:
+    return sum(1 for spec in specs if spec.required and _field_is_empty(spec.widget))
+
+
+def _frame_children(specs: list[FieldSpec]) -> list[Widget]:
+    children: list[Widget] = []
+    for spec in specs:
+        if spec.label:
+            children.append(Label(spec.label + (" *" if spec.required else "")))
+        children.append(spec.widget)
+        if spec.autocomplete is not None:
+            children.append(spec.autocomplete)
+    return children
+
+
+def build_field_frames(specs: list[FieldSpec]) -> list[Vertical]:
+    """Build the required/optional frames (spec 004 US2): required frame first (tall
+    red border, live "N remaining" subtitle), optional frame second (tall blue
+    border). A group with no fields produces no frame for that group (FR-004)."""
+    frames: list[Vertical] = []
+    required_specs = [spec for spec in specs if spec.required]
+    optional_specs = [spec for spec in specs if not spec.required]
+
+    if required_specs:
+        frame = Vertical(*_frame_children(required_specs), id="required-frame")
+        frame.styles.border = ("tall", "red")
+        frame.border_title = "Required"
+        frame.border_subtitle = f"{count_empty_required(specs)} remaining"
+        frames.append(frame)
+
+    if optional_specs:
+        frame = Vertical(*_frame_children(optional_specs), id="optional-frame")
+        frame.styles.border = ("tall", "blue")
+        frame.border_title = "Optional"
+        frames.append(frame)
+
+    return frames
+
+
+def refresh_required_subtitle(required_frame: Vertical, specs: list[FieldSpec]) -> None:
+    """Recompute and re-set the required frame's "N remaining" subtitle (FR-004b)."""
+    required_frame.border_subtitle = f"{count_empty_required(specs)} remaining"
+
+
+def build_identity_frame(command: click.Command) -> Vertical:
+    """Build the Command Identity frame (spec 004 US6): titled, gold-bordered,
+    showing the command's name and its existing CLI description -- the same
+    source the menu's own entries use (FR-002c/FR-020)."""
+    frame = Vertical(Label(command.get_short_help_str(limit=70)), id="identity-frame")
+    frame.styles.border = ("round", "#d4af37")
+    frame.border_title = command.name
+    return frame

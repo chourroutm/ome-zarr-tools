@@ -1,4 +1,5 @@
-"""``fix_metadata``/``migrate`` screens: always-shown diff + rich view (FR-018/FR-019).
+"""``fix_metadata``/``migrate`` screens: always-shown diff + rich view (FR-018/FR-019),
+plus their own Result screens showing the diff that was actually applied (spec 004 US7).
 
 Neither screen invokes its command via ``command.main()`` -- both commands have
 an internal ``click.confirm``/``click.prompt`` gate that would hang on stdin
@@ -15,10 +16,12 @@ from pathlib import Path
 
 import click
 import zarr
+from rich.console import Group
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Input, Label, RichLog, TextArea
+from textual.widgets import Footer, Header, Input, Label, RichLog, Static, TextArea
 
 from ome_zarr_tools.commands.fix_metadata import build_proposed_multiscales, write_metadata
 from ome_zarr_tools.commands.migrate import (
@@ -27,15 +30,43 @@ from ome_zarr_tools.commands.migrate import (
     preview_migration,
 )
 from ome_zarr_tools.io.ome_metadata import detect_version, read_multiscales
-from ome_zarr_tools.tui.diff import render_diff
+from ome_zarr_tools.tui.diff import diff_lines, render_diff
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
-from ome_zarr_tools.tui.fields import SafePathAutoComplete
+from ome_zarr_tools.tui.fields import (
+    FieldSpec,
+    PathField,
+    build_field_frames,
+    build_field_spec,
+    build_identity_frame,
+    refresh_required_subtitle,
+)
+from ome_zarr_tools.tui.screens.result_screen import CommandResultScreen
 from ome_zarr_tools.tui.shortcuts import shared_bindings
 from ome_zarr_tools.tui.status import StatusPanel
 
 
+class FixMetadataResultScreen(CommandResultScreen):
+    def __init__(self, command: click.Command, before: dict | None, after: dict) -> None:
+        super().__init__(command)
+        self.before = before
+        self.after = after
+
+    def compose_result_content(self) -> ComposeResult:
+        yield Static(Group(*diff_lines(self.before, self.after)))
+
+
+class MigrateResultScreen(CommandResultScreen):
+    def __init__(self, command: click.Command, before: dict | None, after: dict) -> None:
+        super().__init__(command)
+        self.before = before
+        self.after = after
+
+    def compose_result_content(self) -> ComposeResult:
+        yield Static(Group(*diff_lines(self.before, self.after)))
+
+
 class _BaseMetadataScreen(Screen[None]):
-    BINDINGS = [*shared_bindings()]
+    BINDINGS = [*shared_bindings(), Binding("f4", "restore_defaults", "Restore Defaults")]
 
     DEFAULT_CSS = """
     #bottom-bar {
@@ -44,14 +75,20 @@ class _BaseMetadataScreen(Screen[None]):
     }
     """
 
-    def __init__(self) -> None:
+    def __init__(self, command: click.Command) -> None:
         super().__init__()
+        self.command = command
+        self._field_specs: list[FieldSpec] = []
+        self._required_frame: Vertical | None = None
+        self._path_field: PathField | None = None
         self._log_lines: list[str] = []
         self._error: str | None = None
         self._status_panel = StatusPanel()
+        self._pending_result: CommandResultScreen | None = None
 
-    def _append_log(self, line: str) -> None:
-        self._log_lines.append(line)
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if self._required_frame is not None:
+            refresh_required_subtitle(self._required_frame, self._field_specs)
 
     def _invocation_text(self) -> str:
         raise NotImplementedError
@@ -75,20 +112,14 @@ class _BaseMetadataScreen(Screen[None]):
         self.action_copy()
         self.app.exit(result=None)
 
-    def _on_execution_done(self, result: ExecutionResult, label: str) -> None:
-        self._status_panel.stop()
-        if result.succeeded:
-            self._append_log(f"{label} succeeded.")
-            self.notify(f"{label} succeeded.")
-        else:
-            self._append_log(f"{label} failed: {result.error}")
-            self.notify(f"{label} failed: {result.error}", severity="error")
+    def _append_log(self, line: str) -> None:
+        self._log_lines.append(line)
+        self._status_panel.append_log(line)
 
 
 class FixMetadataScreen(_BaseMetadataScreen):
-    def __init__(self) -> None:
-        super().__init__()
-        self._path_input = Input(placeholder="ZARR_PATH", id="field-zarr_path")
+    def __init__(self, command: click.Command) -> None:
+        super().__init__(command)
         self._diff_log = RichLog(id="diff", auto_scroll=False)
         self._rich_view = TextArea(language="json", id="rich-view")
         self._before: dict | None = None
@@ -96,9 +127,16 @@ class FixMetadataScreen(_BaseMetadataScreen):
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll():
-            yield Label("ZARR_PATH *")
-            yield self._path_input
-            yield SafePathAutoComplete(self._path_input, path=".")
+            yield build_identity_frame(self.command)
+            zarr_path_param = next(p for p in self.command.params if p.name == "zarr_path")
+            spec = build_field_spec(zarr_path_param)
+            assert isinstance(spec.widget, PathField)
+            self._path_field = spec.widget
+            self._field_specs = [spec]
+            for frame in build_field_frames(self._field_specs):
+                if frame.id == "required-frame":
+                    self._required_frame = frame
+                yield frame
             yield Label("Diff (current vs. proposed)")
             yield self._diff_log
             yield Label("Proposed metadata (editable)")
@@ -108,13 +146,15 @@ class FixMetadataScreen(_BaseMetadataScreen):
             yield Footer()
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        super().on_input_changed(event)
         self._load_and_preview()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         self._refresh_diff()
 
     def _load_and_preview(self) -> None:
-        path_str = self._path_input.value.strip()
+        assert self._path_field is not None
+        path_str = self._path_field.value.strip()
         if not path_str or not Path(path_str).exists():
             return
         try:
@@ -173,12 +213,14 @@ class FixMetadataScreen(_BaseMetadataScreen):
         render_diff(self._diff_log, self._before, after)
 
     def _invocation_text(self) -> str:
-        return f"ome-zarr-tools fix_metadata {self._path_input.value}".strip()
+        assert self._path_field is not None
+        return f"ome-zarr-tools fix_metadata {self._path_field.value}".strip()
 
     def action_run(self) -> None:
-        path_str = self._path_input.value.strip()
+        assert self._path_field is not None
+        path_str = self._path_field.value.strip()
         if not path_str or not Path(path_str).exists():
-            self._path_input.focus()
+            self._path_field.input.focus()
             self.notify("ZARR_PATH is required", severity="error")
             return
         proposed = self._current_proposed()
@@ -186,28 +228,48 @@ class FixMetadataScreen(_BaseMetadataScreen):
             self.notify(self._error or "Invalid metadata", severity="error")
             return
 
+        if self._pending_result is not None:
+            self.app.push_screen(self._pending_result)
+            return
+
         path = Path(path_str)
         group = zarr.open_group(path_str, mode="r+")
-        self._path_input.disabled = True
+        after = proposed[0] if proposed else {}
+        self._path_field.disabled = True
         self._rich_view.disabled = True
 
         def _work() -> None:
             write_metadata(path, group, proposed)
 
-        self._status_panel.start()
+        result_screen = FixMetadataResultScreen(self.command, self._before, after)
+        self._pending_result = result_screen
+        self.app.push_screen(result_screen)
+        on_progress, on_log = result_screen.begin()
+
+        async def _on_done(result: ExecutionResult) -> None:
+            self._pending_result = None
+            assert self._path_field is not None
+            self._path_field.disabled = False
+            self._rich_view.disabled = False
+            await result_screen.finish(result)
+
         run_in_background(
             self.app,
             _work,
-            lambda r: self._on_execution_done(r, "fix_metadata"),
-            on_progress=self._status_panel.update_progress,
-            on_log=self._status_panel.append_log,
+            _on_done,
+            on_progress=on_progress,
+            on_log=on_log,
         )
+
+    async def action_restore_defaults(self) -> None:
+        if self._pending_result is not None:
+            return
+        await self.app.switch_screen(FixMetadataScreen(self.command))
 
 
 class MigrateScreen(_BaseMetadataScreen):
-    def __init__(self) -> None:
-        super().__init__()
-        self._path_input = Input(placeholder="ZARR_PATH", id="field-zarr_path")
+    def __init__(self, command: click.Command) -> None:
+        super().__init__(command)
         self._target_input = Input(value=DEFAULT_TARGET_VERSION, id="field-target_version")
         self._diff_log = RichLog(id="diff", auto_scroll=False)
         self._rich_view = TextArea(language="json", id="rich-view", read_only=True)
@@ -216,9 +278,16 @@ class MigrateScreen(_BaseMetadataScreen):
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll():
-            yield Label("ZARR_PATH *")
-            yield self._path_input
-            yield SafePathAutoComplete(self._path_input, path=".")
+            yield build_identity_frame(self.command)
+            zarr_path_param = next(p for p in self.command.params if p.name == "zarr_path")
+            spec = build_field_spec(zarr_path_param)
+            assert isinstance(spec.widget, PathField)
+            self._path_field = spec.widget
+            self._field_specs = [spec]
+            for frame in build_field_frames(self._field_specs):
+                if frame.id == "required-frame":
+                    self._required_frame = frame
+                yield frame
             yield Label("--target_version")
             yield self._target_input
             yield Label("Diff (current vs. migrated)")
@@ -230,10 +299,12 @@ class MigrateScreen(_BaseMetadataScreen):
             yield Footer()
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        super().on_input_changed(event)
         self._load_and_preview()
 
     def _load_and_preview(self) -> None:
-        path_str = self._path_input.value.strip()
+        assert self._path_field is not None
+        path_str = self._path_field.value.strip()
         target_version = self._target_input.value.strip() or DEFAULT_TARGET_VERSION
         if not path_str or not Path(path_str).exists():
             return
@@ -258,19 +329,25 @@ class MigrateScreen(_BaseMetadataScreen):
         render_diff(self._diff_log, self._before, after)
 
     def _invocation_text(self) -> str:
+        assert self._path_field is not None
         return (
-            f"ome-zarr-tools migrate {self._path_input.value} "
+            f"ome-zarr-tools migrate {self._path_field.value} "
             f"--target_version {self._target_input.value}"
         ).strip()
 
     def action_run(self) -> None:
-        path_str = self._path_input.value.strip()
+        assert self._path_field is not None
+        path_str = self._path_field.value.strip()
         if not path_str or not Path(path_str).exists():
-            self._path_input.focus()
+            self._path_field.input.focus()
             self.notify("ZARR_PATH is required", severity="error")
             return
         if self._error:
             self.notify(self._error, severity="error")
+            return
+
+        if self._pending_result is not None:
+            self.app.push_screen(self._pending_result)
             return
 
         target_version = self._target_input.value.strip() or DEFAULT_TARGET_VERSION
@@ -282,17 +359,34 @@ class MigrateScreen(_BaseMetadataScreen):
             return
 
         group = zarr.open_group(path_str, mode="r")
-        self._path_input.disabled = True
+        after = json.loads(self._rich_view.text) if self._rich_view.text else {}
+        self._path_field.disabled = True
         self._target_input.disabled = True
 
         def _work() -> None:
             apply_migration(path, group, target_version)
 
-        self._status_panel.start()
+        result_screen = MigrateResultScreen(self.command, self._before, after)
+        self._pending_result = result_screen
+        self.app.push_screen(result_screen)
+        on_progress, on_log = result_screen.begin()
+
+        async def _on_done(result: ExecutionResult) -> None:
+            self._pending_result = None
+            assert self._path_field is not None
+            self._path_field.disabled = False
+            self._target_input.disabled = False
+            await result_screen.finish(result)
+
         run_in_background(
             self.app,
             _work,
-            lambda r: self._on_execution_done(r, "migrate"),
-            on_progress=self._status_panel.update_progress,
-            on_log=self._status_panel.append_log,
+            _on_done,
+            on_progress=on_progress,
+            on_log=on_log,
         )
+
+    async def action_restore_defaults(self) -> None:
+        if self._pending_result is not None:
+            return
+        await self.app.switch_screen(MigrateScreen(self.command))

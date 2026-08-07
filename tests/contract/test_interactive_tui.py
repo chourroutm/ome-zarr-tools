@@ -9,9 +9,18 @@ from ome_zarr_tools.tui.fields import build_autocomplete, build_field_widget
 
 def test_command_form_has_no_button_and_has_footer_shortcuts():
     action_names = {binding.action for binding in CommandFormScreen.BINDINGS}
-    assert action_names == {"run", "copy", "copy_and_exit", "toggle_log", "back", "cancel"}
+    assert action_names == {
+        "run",
+        "copy",
+        "copy_and_exit",
+        "toggle_log",
+        "back",
+        "cancel",
+        "restore_defaults",  # spec 004 FR-027
+    }
     # No Button widget is used to run a command (FR-005) -- no "submit"-style
-    # binding/id anywhere in the class definition.
+    # binding/id anywhere in the class definition. Spec 004's Browse button
+    # (US4) lives on the `PathField` widget, not the screen class itself.
     assert not hasattr(CommandFormScreen, "on_button_pressed")
 
 

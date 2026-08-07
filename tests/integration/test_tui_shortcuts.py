@@ -32,9 +32,15 @@ def test_config_screen_overrides_only_the_primary_label():
     assert run_binding.description == "Save"
 
 
-def test_inspect_screen_extra_shortcut_is_appended_after_the_shared_set():
-    extra = InspectScreen.BINDINGS[len(_SHARED_KEY_ACTION_PAIRS) :]
-    assert _key_action_pairs(extra) == [("f9", "switch_panel")]
+def test_every_prep_screen_appends_restore_defaults_after_the_shared_set():
+    """Spec 004 FR-027: Restore Defaults (F4) is appended after the shared prefix on
+    every prep screen -- not baked into `shared_bindings()` itself, since the Command
+    Result screen (spec 004 US7) reuses the shared prefix too but has no Restore
+    Defaults action of its own."""
+    screens = (CommandFormScreen, InspectScreen, FixMetadataScreen, MigrateScreen, ConfigScreen)
+    for screen_cls in screens:
+        extra = _key_action_pairs(screen_cls.BINDINGS[len(_SHARED_KEY_ACTION_PAIRS) :])
+        assert ("f4", "restore_defaults") in extra, screen_cls.__name__
 
 
 def test_shared_bindings_default_label_is_run():

@@ -42,19 +42,19 @@ async def test_command_form_screen_has_one_header_one_status_panel_one_footer():
 
 
 async def test_inspect_screen_has_one_header_one_status_panel_one_footer():
-    await _assert_skeleton(InspectScreen)
+    await _assert_skeleton(lambda: InspectScreen(COMMANDS["inspect"]))
 
 
 async def test_fix_metadata_screen_has_one_header_one_status_panel_one_footer():
-    await _assert_skeleton(FixMetadataScreen)
+    await _assert_skeleton(lambda: FixMetadataScreen(COMMANDS["fix_metadata"]))
 
 
 async def test_migrate_screen_has_one_header_one_status_panel_one_footer():
-    await _assert_skeleton(MigrateScreen)
+    await _assert_skeleton(lambda: MigrateScreen(COMMANDS["migrate"]))
 
 
 async def test_config_screen_has_one_header_one_status_panel_one_footer():
-    await _assert_skeleton(ConfigScreen)
+    await _assert_skeleton(lambda: ConfigScreen(COMMANDS["config"]))
 
 
 async def test_command_menu_screen_shares_header_footer_chrome_with_no_status_panel():

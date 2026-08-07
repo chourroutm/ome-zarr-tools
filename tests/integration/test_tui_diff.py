@@ -5,20 +5,27 @@ import zarr
 from textual.app import App
 from textual.widgets import Input, TextArea
 
+from ome_zarr_tools.cli import cli
 from ome_zarr_tools.commands.fix_metadata import build_proposed_multiscales
 from ome_zarr_tools.commands.migrate import preview_migration
 from ome_zarr_tools.io.ome_metadata import read_multiscales
-from ome_zarr_tools.tui.screens.metadata_screen import FixMetadataScreen, MigrateScreen
+from ome_zarr_tools.tui.screens.metadata_screen import (
+    FixMetadataResultScreen,
+    FixMetadataScreen,
+    MigrateScreen,
+)
+
+COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
 
 
 class _FixMetadataApp(App):
     def on_mount(self) -> None:
-        self.push_screen(FixMetadataScreen())
+        self.push_screen(FixMetadataScreen(COMMANDS["fix_metadata"]))
 
 
 class _MigrateApp(App):
     def on_mount(self) -> None:
-        self.push_screen(MigrateScreen())
+        self.push_screen(MigrateScreen(COMMANDS["migrate"]))
 
 
 async def _wait_for(pilot, predicate, attempts: int = 50) -> None:
@@ -130,9 +137,13 @@ async def test_fix_metadata_screen_invalid_edit_blocks_run(sample_ome_zarr):
         rich_view.text = json.dumps(proposed, indent=2)
         await pilot.pause()
         await pilot.press("f5")
-        await _wait_for(pilot, lambda: bool(screen._log_lines))
+        await pilot.pause()
 
-    assert any("succeeded" in line for line in screen._log_lines)
+        assert isinstance(app.screen, FixMetadataResultScreen)
+        result_screen = app.screen
+        await _wait_for(pilot, lambda: result_screen._finished)
+
+    assert "succeeded" in str(result_screen._outcome_label.content)
 
 
 async def test_migrate_screen_preview_updates_with_target_version_and_no_writes_before_run(
