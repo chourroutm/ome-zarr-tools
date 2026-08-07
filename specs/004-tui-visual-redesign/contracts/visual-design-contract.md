@@ -11,7 +11,6 @@ back into per-screen one-offs (the same reasoning as `003`'s
 |---|---|
 | Logo | Static ASCII art, Matryoshka-doll motif, shown above the `OptionList`. Hidden (not clipped) below a minimum terminal size. |
 | Menu entry | 3-line Rich `Option` prompt: line 1 = command name (bold), line 2 = `command.help`/`short_help` (blank if none), line 3 = blank spacer. |
-| Header clock | `Header(show_clock=True)` on every screen. |
 
 ## Field group frames (User Story 2)
 
@@ -59,14 +58,14 @@ back into per-screen one-offs (the same reasoning as `003`'s
 ## Who implements this contract
 
 - `tui/logo.py` — `Logo`, `LOGO`
-- `tui/app.py` — `CommandMenuScreen` (menu entries, logo, header clock),
+- `tui/app.py` — `CommandMenuScreen` (menu entries, logo),
   `CommandFormScreen` (frames, labels, add-on, browse — via `fields.py`)
 - `tui/fields.py` — `FieldSpec`, `build_field_frames`, `field_label`,
   `REMOTE_SCHEME_COLORS`, add-on `Horizontal` composition, Browse button
 - `tui/screens/browse_screen.py` — `BrowsePickerScreen`, `SafeDirectoryTree`
 - `tui/screens/inspect_screen.py`, `metadata_screen.py`, `config_screen.py`
   — each screen's own `FieldSpec` list + `build_field_frames()` call,
-  human-readable labels, `Header(show_clock=True)`
+  human-readable labels
 
 ## Who verifies this contract
 

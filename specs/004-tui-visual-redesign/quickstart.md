@@ -19,7 +19,7 @@ each user story; existing `tests/integration/test_interactive_tui.py`,
 unchanged in behavior — this feature changes field layout/labels/widgets,
 not the `003` shortcut/structure contracts.
 
-## Manual walkthrough (User Story 1 — logo, menu entries, clock)
+## Manual walkthrough (User Story 1 — logo, menu entries)
 
 1. `ome-zarr-tools interactive --tui`
 2. Confirm the ASCII logo renders above the command list at a normal
@@ -27,8 +27,6 @@ not the `003` shortcut/structure contracts.
    (no clipped/corrupted output) rather than crowding the list.
 3. Confirm each command entry spans 3 lines (name, help text, blank), with
    arrow-key/click selection and Enter-to-open still working.
-4. Confirm the header shows a live clock, and that it's still there after
-   opening any command screen.
 
 ## Manual walkthrough (User Story 2/3 — frames, labels)
 

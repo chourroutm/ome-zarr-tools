@@ -7,8 +7,8 @@
 ## Summary
 
 Redesign the Textual TUI's visual surface across 5 user stories: a static
-ASCII logo + 3-line Rich `OptionList` entries + a header clock on the
-command menu (US1); required/optional field-group frames on every command
+ASCII logo + 3-line Rich `OptionList` entries on the command menu (US1);
+required/optional field-group frames on every command
 screen (US2); human-readable field labels with CLI tokens unchanged (US3);
 a `ModalScreen`-based directory-tree "Browse" picker beside every path
 field (US4); and a Bootstrap-input-group-style colored add-on for
@@ -28,7 +28,7 @@ constant/function, not a deeper class-hierarchy refactor).
 
 **Primary Dependencies**: `textual>=8.0`, `textual-autocomplete>=4.0`
 (unchanged). No new dependencies — `OptionList`, `DirectoryTree`,
-`ModalScreen`, `Header(show_clock=True)`, and `Button` are all part of
+`ModalScreen`, and `Button` are all part of
 `textual` already installed; Rich renderables (`rich.console.Group`,
 `rich.text.Text`) come from `rich`, already a transitive dependency of
 `textual`.
@@ -118,8 +118,7 @@ src/
         │                             # widget with resize-reactive display (US1)
         ├── app.py                   # MODIFIED: CommandMenuScreen mounts Logo,
         │                             # builds 3-line Rich Option prompts per
-        │                             # command (US1); Header(show_clock=True)
-        │                             # everywhere (US1); CommandFormScreen builds
+        │                             # command (US1); CommandFormScreen builds
         │                             # FieldSpecs per click.Parameter and calls
         │                             # build_field_frames() instead of a flat
         │                             # field loop (US2/US3)
@@ -134,7 +133,7 @@ src/
             ├── browse_screen.py      # NEW: BrowsePickerScreen(ModalScreen[Path |
             │                          # None]), SafeDirectoryTree (US4)
             ├── inspect_screen.py      # MODIFIED: own FieldSpec list ->
-            │                          # build_field_frames(); Header(show_clock=True)
+            │                          # build_field_frames()
             ├── metadata_screen.py     # MODIFIED: same, for FixMetadataScreen and
             │                          # MigrateScreen
             └── config_screen.py       # MODIFIED: same, for ConfigScreen

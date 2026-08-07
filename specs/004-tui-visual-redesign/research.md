@@ -103,13 +103,6 @@ line 3 blank — satisfying FR-002a/FR-002c without a custom widget.
 OptionList widget with a Rich content") using `OptionList`'s documented,
 built-in capability — no custom `ListView`/card widget needed.
 
-## Decision: Header clock via `Header(show_clock=True)`
-
-**Decision**: Every screen's `Header()` call becomes `Header(show_clock=True)`.
-
-**Rationale**: This is a built-in Textual `Header` constructor parameter —
-zero custom code satisfies FR-002d exactly.
-
 ## Decision: Browse picker as a `ModalScreen[Path | None]`
 
 **Decision**: New `tui/screens/browse_screen.py`'s `BrowsePickerScreen`
