@@ -109,6 +109,11 @@ def build_field_widget(param: click.Parameter) -> Checkbox | Select | Input:
         return Select(options, value=default, id=field_id, allow_blank=default is None)
 
     default = None if param.required else param.default
+    if param.multiple and not isinstance(default, tuple):
+        # `multiple=True` options with no explicit `default=` resolve to an
+        # internal Click "unset" sentinel here, not `()` -- the runtime value is
+        # always a tuple (empty if unset), so treat any non-tuple as empty too.
+        default = ()
     if default in (None, ()):
         default_str = ""
     elif isinstance(default, (list, tuple)):

@@ -1,6 +1,7 @@
 from click.testing import CliRunner
 
 from ome_zarr_tools.cli import cli
+from ome_zarr_tools.commands.extract import extract
 from ome_zarr_tools.commands.from_images import from_images
 from ome_zarr_tools.commands.inspect import inspect
 from ome_zarr_tools.tui.app import CommandFormScreen, InteractiveTUIApp
@@ -34,6 +35,16 @@ def test_path_field_gets_autocomplete_non_path_field_does_not():
     format_param = next(p for p in inspect.params if p.name == "output_format")
     widget = build_field_widget(format_param)
     assert build_autocomplete(format_param, widget) is None
+
+
+def test_multiple_option_with_no_explicit_default_shows_blank_not_sentinel():
+    """`extract`'s `--corner` is `multiple=True, nargs=3` with no explicit
+    `default=`; Click resolves `param.default` to an internal "unset" sentinel
+    object here (not `()`), which must not leak into the widget as literal text
+    like "Sentinel.UNSET"."""
+    corner_param = next(p for p in extract.params if p.name == "corner")
+    widget = build_field_widget(corner_param)
+    assert widget.value == ""
 
 
 def test_help_lists_tui_flag():
