@@ -185,11 +185,34 @@ async def test_every_prep_screen_shows_identity_frame_with_name_and_description(
         async with app.run_test() as pilot:
             await pilot.pause()
             frame = app.screen.query_one("#identity-frame", Vertical)
-            assert frame.border_title == command.name
-            expected_desc = command.get_short_help_str(limit=70)
+            name_label = frame.query_one("#identity-name", Label)
+            description_label = frame.query_one("#identity-description", Label)
+            assert str(name_label.content) == command.name
+            assert name_label.styles.text_style.bold is True
+            expected_desc = command.get_short_help_str(limit=10_000)
             assert expected_desc  # sanity: these real commands do have help text
-            texts = [str(w.content) for w in frame.query("Label")]
-            assert expected_desc in texts
+            assert str(description_label.content) == expected_desc
+            assert description_label.styles.max_height is not None
+            assert description_label.styles.max_height.value == 3
+            assert frame.styles.padding == Spacing(1, 2, 1, 2)
+
+
+async def test_identity_frame_description_never_ellipsis_ed_even_when_long():
+    """The menu's 3-line prompt truncates a long description at 70 chars with an
+    ellipsis, but the command prep screen has room for the whole thing (unlike
+    /speckit-tasks' original T034/T036, which reused the menu's limit=70)."""
+    command = COMMANDS["apply_mask"]
+    full_help = command.get_short_help_str(limit=10_000)
+    assert len(full_help) > 70  # sanity: this command's help text is long enough to matter
+    assert command.get_short_help_str(limit=70).endswith("...")  # menu would truncate this
+
+    app = _ScreenApp(lambda: CommandFormScreen(command))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        frame = app.screen.query_one("#identity-frame", Vertical)
+        texts = [str(w.content) for w in frame.query("Label")]
+        assert full_help in texts
+        assert not any(text.endswith("...") for text in texts)
 
 
 async def test_identity_frame_blank_description_for_command_with_no_help():
@@ -207,18 +230,19 @@ async def test_identity_frame_blank_description_for_command_with_no_help():
     async with app.run_test() as pilot:
         await pilot.pause()
         frame = app.screen.query_one("#identity-frame", Vertical)
-        assert frame.border_title == "no_help"
-        label = frame.query_one("Label")
-        assert str(label.content) == ""
+        name_label = frame.query_one("#identity-name", Label)
+        description_label = frame.query_one("#identity-description", Label)
+        assert str(name_label.content) == "no_help"
+        assert str(description_label.content) == ""
 
 
-async def test_identity_frame_visually_distinct_from_field_group_frames():
+async def test_identity_frame_has_no_border_unlike_field_group_frames():
     app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
         identity = screen.query_one("#identity-frame", Vertical)
         required = screen.query_one("#required-frame", Vertical)
-        assert identity.styles.border_top[0] != required.styles.border_top[0] or (
-            identity.styles.border_top[1].hex != required.styles.border_top[1].hex
-        )
+        assert identity.border_title is None
+        assert identity.styles.border_top[0] in ("", "none")
+        assert required.styles.border_top[0] == "solid"

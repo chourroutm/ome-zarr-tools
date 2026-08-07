@@ -399,10 +399,20 @@ def refresh_required_subtitle(required_frame: Vertical, specs: list[FieldSpec]) 
 
 
 def build_identity_frame(command: click.Command) -> Vertical:
-    """Build the Command Identity frame (spec 004 US6): titled, gold-bordered,
-    showing the command's name and its existing CLI description -- the same
-    source the menu's own entries use (FR-002c/FR-020)."""
-    frame = Vertical(Label(command.get_short_help_str(limit=70)), id="identity-frame")
-    frame.styles.border = ("round", "#d4af37")
-    frame.border_title = command.name
+    """Build the Command Identity block (spec 004 US6, shared by the command prep and
+    command result screens): the command name in bold, its existing CLI description
+    underneath -- the same source the menu's own entries use, shown in full (never
+    ellipsis-ed) but capped at 3 lines so a long description can't push the rest of
+    the screen down (FR-002c/FR-020). No border/title: borderless, just a bit of
+    padding, so it doesn't compete visually with the field-group frames."""
+    name_label = Label(command.name or "", id="identity-name")
+    name_label.styles.text_style = "bold"
+
+    description_label = Label(command.get_short_help_str(limit=10_000), id="identity-description")
+    description_label.styles.width = "100%"
+    description_label.styles.max_height = 3
+
+    frame = Vertical(name_label, description_label, id="identity-frame")
+    frame.styles.height = "auto"
+    frame.styles.padding = (1, 2)
     return frame
