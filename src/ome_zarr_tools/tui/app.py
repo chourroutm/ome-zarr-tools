@@ -76,7 +76,7 @@ class CommandMenuScreen(Screen[None]):
         self.commands = commands
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header()
         yield Logo()
         yield OptionList(
             *[
@@ -125,7 +125,7 @@ class CommandFormScreen(Screen[None]):
         self._status_panel = StatusPanel()
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header()
         with VerticalScroll():
             for param in self.command.params:
                 label = field_label(param) + (" *" if is_required(param) else "")

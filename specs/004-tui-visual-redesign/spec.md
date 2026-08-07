@@ -23,9 +23,7 @@ today's compact, single-line `OptionList` entries. The app immediately reads
 as a designed tool with its own identity, not a generic list of subcommands
 in a box. The logo and enlarged rows are specific to the command menu —
 every other screen (forms, `inspect`, `config`, `fix_metadata`/`migrate`) is
-out of scope for those two changes. The header clock is the one exception:
-since every screen already shares the same `Header` chrome (per `003`), it
-appears everywhere, not just on the menu.
+out of scope for those two changes.
 
 **Why this priority**: The single most requested, highest-visibility change
 ("add a logo at the top... like in Toad") — it's the first thing every user
@@ -33,9 +31,8 @@ sees, every time.
 
 **Independent Test**: Open the command menu at a standard terminal size
 (80×24 or larger) and confirm the ASCII logo renders above the command list,
-that each command occupies a 3-line highlightable block rather than today's
-1-line highlightable text, and that the header bar shows a live clock; open
-any other screen and confirm the clock is still shown there too.
+and that each command occupies a 3-line highlightable block rather than
+today's 1-line highlightable text.
 
 **Acceptance Scenarios**:
 
@@ -49,10 +46,6 @@ any other screen and confirm the clock is still shown there too.
    today's 1-line highlightable text), with selection/highlight behavior
    unchanged (arrow keys/click still select; Enter still opens that
    command's screen).
-4. **Given** any screen in the app (not just the command menu — every
-   screen already shares the same header chrome per `003`), **When** it is
-   shown, **Then** the shared header bar displays a live clock, updating at
-   least once per minute.
 
 ---
 
@@ -264,9 +257,6 @@ confirm the scheme reappears as plain editable text in the input.
   directly from that command's existing CLI help text, never a separately
   maintained copy, and MUST render blank (not an error) for a command with
   no help text.
-- **FR-002d**: The shared header bar MUST display a live clock, updating at
-  least once per minute, on every screen in the app (not just the command
-  menu), since every screen already shares the same header chrome.
 - **FR-003**: Every command form (generic and specialized) MUST present
   required fields grouped together and positioned before optional fields.
 - **FR-004**: Required fields MUST be enclosed in one titled, bordered
@@ -357,8 +347,6 @@ confirm the scheme reappears as plain editable text in the input.
 - **SC-001a**: Every command menu entry renders as exactly a 3-line
   highlightable block (up from today's 1 line), with selection/open
   behavior unchanged.
-- **SC-001b**: The header's clock is visible and updates at least once per
-  minute on 100% of screens in the app.
 - **SC-002**: 100% of command forms with a mix of required/optional fields
   show two frames (Required, Optional), with all required fields inside the
   first and all optional fields inside the second.

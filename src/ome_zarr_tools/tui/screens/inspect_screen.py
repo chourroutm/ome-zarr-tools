@@ -51,7 +51,7 @@ class InspectScreen(Screen[None]):
         self._report: dict | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header()
         with VerticalScroll():
             yield Label("ZARR_PATH *")
             yield self._path_input
