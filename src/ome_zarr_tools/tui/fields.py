@@ -346,10 +346,15 @@ def count_empty_required(specs: list[FieldSpec]) -> int:
 
 
 def _frame_children(specs: list[FieldSpec]) -> list[Widget]:
+    """No trailing "required" marker on individual labels -- required fields are
+    already grouped under the "Required" frame, so a per-field marker would be
+    redundant (spec 004 US2)."""
     children: list[Widget] = []
-    for spec in specs:
+    for index, spec in enumerate(specs):
         if spec.label:
-            children.append(Label(spec.label + (" *" if spec.required else "")))
+            children.append(Label(spec.label))
+        if index < len(specs) - 1:
+            spec.widget.styles.margin = (0, 0, 1, 0)
         children.append(spec.widget)
         if spec.autocomplete is not None:
             children.append(spec.autocomplete)
@@ -357,24 +362,32 @@ def _frame_children(specs: list[FieldSpec]) -> list[Widget]:
 
 
 def build_field_frames(specs: list[FieldSpec]) -> list[Vertical]:
-    """Build the required/optional frames (spec 004 US2): required frame first (tall
-    red border, live "N remaining" subtitle), optional frame second (tall blue
-    border). A group with no fields produces no frame for that group (FR-004)."""
+    """Build the required/optional frames (spec 004 US2): required frame first (solid
+    red border, live "N remaining" subtitle), optional frame second (solid blue
+    border). Each frame gets a 1-character margin/padding and sizes to its content
+    (rather than expanding to fill the screen). A group with no fields produces no
+    frame for that group (FR-004)."""
     frames: list[Vertical] = []
     required_specs = [spec for spec in specs if spec.required]
     optional_specs = [spec for spec in specs if not spec.required]
 
     if required_specs:
         frame = Vertical(*_frame_children(required_specs), id="required-frame")
-        frame.styles.border = ("tall", "red")
+        frame.styles.border = ("solid", "red")
         frame.border_title = "Required"
         frame.border_subtitle = f"{count_empty_required(specs)} remaining"
+        frame.styles.height = "auto"
+        frame.styles.margin = 1
+        frame.styles.padding = 1
         frames.append(frame)
 
     if optional_specs:
         frame = Vertical(*_frame_children(optional_specs), id="optional-frame")
-        frame.styles.border = ("tall", "blue")
+        frame.styles.border = ("solid", "blue")
         frame.border_title = "Optional"
+        frame.styles.height = "auto"
+        frame.styles.margin = 1
+        frame.styles.padding = 1
         frames.append(frame)
 
     return frames

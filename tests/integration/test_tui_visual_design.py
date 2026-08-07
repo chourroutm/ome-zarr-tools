@@ -9,7 +9,8 @@ from __future__ import annotations
 import click
 from textual.app import App
 from textual.containers import Vertical
-from textual.widgets import Input
+from textual.geometry import Spacing
+from textual.widgets import Input, Label
 
 from ome_zarr_tools.cli import cli
 from ome_zarr_tools.tui.app import CommandFormScreen
@@ -37,13 +38,32 @@ async def test_build_field_frames_order_and_border_style():
         optional = next(f for f in frames if f.id == "optional-frame")
         assert required.border_title == "Required"
         assert optional.border_title == "Optional"
-        assert required.styles.border_top[0] == "tall"
+        assert required.styles.border_top[0] == "solid"
         assert required.styles.border_top[1].hex.lower() == "#ff0000"
-        assert optional.styles.border_top[0] == "tall"
+        assert optional.styles.border_top[0] == "solid"
         assert optional.styles.border_top[1].hex.lower() == "#0000ff"
+        for frame in (required, optional):
+            assert frame.styles.height is not None and frame.styles.height.is_auto
+            assert frame.styles.margin == Spacing(1, 1, 1, 1)
+            assert frame.styles.padding == Spacing(1, 1, 1, 1)
         # required frame comes before optional frame in document order
         all_widgets = list(screen.query(Vertical))
         assert all_widgets.index(required) < all_widgets.index(optional)
+
+
+async def test_field_group_frames_have_blank_line_between_fields_not_after_last():
+    app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        required_specs = [s for s in screen._field_specs if s.required]
+        optional_specs = [s for s in screen._field_specs if not s.required]
+        assert len(required_specs) >= 2  # sanity: needs >=2 fields to exercise "between"
+        assert len(optional_specs) >= 2
+        for specs in (required_specs, optional_specs):
+            for spec in specs[:-1]:
+                assert spec.widget.styles.margin == Spacing(0, 0, 1, 0)
+            assert specs[-1].widget.styles.margin == Spacing(0, 0, 0, 0)
 
 
 async def test_required_only_command_shows_only_required_frame():
@@ -119,14 +139,18 @@ def test_field_label_long_name_wraps_not_truncates(tmp_path):
     assert not label.endswith("...")
 
 
-async def test_required_marker_still_present_with_human_readable_label():
+async def test_required_fields_have_no_per_field_marker_since_grouped_in_required_frame():
+    """The "Required" frame's border_title already conveys required-ness, so an
+    individual field's label carries no redundant marker (e.g. trailing "*")."""
     app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
         required_spec = next(s for s in screen._field_specs if s.required)
         label_texts = [str(label.content) for label in screen._required_frame.query("Label")]
-        assert required_spec.label + " *" in label_texts
+        assert required_spec.label in label_texts
+        assert required_spec.label + " *" not in label_texts
+        assert not any(text.endswith("*") for text in label_texts)
 
 
 async def test_copy_uses_raw_flag_unaffected_by_label_casing(monkeypatch, tmp_path):
