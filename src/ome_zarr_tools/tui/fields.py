@@ -158,7 +158,11 @@ class PathField(Horizontal):
     }
     PathField > .path-field-addon {
         width: auto;
-        padding: 0 1;
+        height: 3;
+        padding: 0 2;
+        background: $surface;
+        border: tall $border-blurred;
+        content-align: left middle;
         text-style: bold;
     }
     PathField > Input {
