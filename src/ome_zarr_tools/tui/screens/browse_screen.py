@@ -28,6 +28,7 @@ class SafeDirectoryTree(DirectoryTree):
     ) -> None:
         super().__init__(path, id=id)
         self.only = only
+        self.show_root = False  # the root path is already shown in #root-path-input
 
     def filter_paths(self, paths):  # noqa: ANN001
         result = []
