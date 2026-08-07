@@ -132,7 +132,9 @@ async def test_autocomplete_disabled_while_addon_shown_reenabled_after():
         assert field.autocomplete.suppressed is False
 
 
-async def test_browse_button_stays_right_of_group_regardless_of_addon_state():
+async def test_browse_button_hidden_while_addon_shown_reappears_when_removed():
+    """Browsing the local filesystem doesn't apply to a remote path, so the Browse
+    button hides for as long as the add-on is shown (FR-019)."""
     app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -140,13 +142,21 @@ async def test_browse_button_stays_right_of_group_regardless_of_addon_state():
         button = field.query_one(Button)
         children_before = list(field.children)
         assert children_before.index(button) == len(children_before) - 1
+        assert button.display is True
 
         field.input.focus()
         await pilot.press(*"gs://bucket/key")
         await pilot.pause()
         children_after = list(field.children)
-        assert children_after.index(button) == len(children_after) - 1
+        assert children_after.index(button) == len(children_after) - 1  # position unchanged
         assert field._addon_label.display is True
+        assert button.display is False
+
+        for _ in range(len("bucket/key")):
+            await pilot.press("backspace")
+        await pilot.pause()
+        assert field._addon_label.display is False
+        assert button.display is True
 
 
 async def test_cli_token_identical_between_addon_state_and_plain_text(monkeypatch, tmp_path):

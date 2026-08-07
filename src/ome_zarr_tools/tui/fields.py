@@ -148,8 +148,9 @@ class PathField(Horizontal):
     more text (US5, FR-014/FR-015); the add-on reverts to plain editable text
     when the remainder is emptied (FR-017). Local autocomplete is hidden
     whenever the value is remote-recognized, bare scheme included (FR-016).
-    Browse (US4, FR-008/FR-009) always stays to the right of the whole group
-    (FR-019).
+    Browse (US4, FR-008/FR-009) stays to the right of the input when shown, but
+    is hidden while the add-on is shown -- browsing the local filesystem doesn't
+    apply to a remote path (FR-019).
     """
 
     DEFAULT_CSS = """
@@ -204,6 +205,8 @@ class PathField(Horizontal):
             self._sync_addon_state()
 
     def _sync_addon_state(self) -> None:
+        """Also hides the Browse button while the add-on is shown -- browsing the
+        local filesystem doesn't apply to a remote path (FR-019)."""
         if self._addon_scheme is not None:
             if self.input.value == "":
                 scheme = self._addon_scheme
@@ -211,6 +214,7 @@ class PathField(Horizontal):
                 self._addon_label.display = False
                 self.input.value = scheme
                 self.input.cursor_position = len(scheme)
+                self._browse_button.display = True
             return
 
         value = self.input.value
@@ -224,6 +228,7 @@ class PathField(Horizontal):
                     self._addon_label.display = True
                     self.input.value = remainder
                     self.input.cursor_position = len(remainder)
+                    self._browse_button.display = False
                 if self.autocomplete is not None:
                     self.autocomplete.suppressed = True
                     self.autocomplete.action_hide()
