@@ -199,7 +199,7 @@ class ConfigScreen(Screen[None]):
 
     def action_copy_and_exit(self) -> None:
         self.action_copy()
-        self.app.exit(result=None)
+        self.app.exit(result=self._invocation_text())
 
     def action_toggle_log(self) -> None:
         self._status_panel.toggle_log()

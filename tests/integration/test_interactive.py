@@ -2,6 +2,7 @@ import zarr
 from click.testing import CliRunner
 
 from ome_zarr_tools.cli import cli
+from ome_zarr_tools.tui.app import InteractiveTUIApp
 
 
 def test_interactive_runs_from_images(tmp_path, image_stack_dir):
@@ -85,3 +86,42 @@ def test_interactive_cancel_leaves_no_side_effects(tmp_path, image_stack_dir):
     assert result.exit_code == 0, result.output
     assert "Cancelled" in result.output
     assert not out.exists()
+
+
+def test_tui_copy_and_exit_fallback_prints_invocation(monkeypatch, capsys):
+    """spec 005: once the TUI exits via "Copy & exit", the exact invocation
+    is echoed to the terminal -- a reliable fallback for when the clipboard
+    escape sequence silently fails (e.g. tmux/screen without passthrough).
+
+    Calls `_run_tui()` directly (not through `CliRunner`, whose substituted
+    stdin/stdout always report `isatty() == False`, unrelated to and
+    unaffected by monkeypatching the real `sys.stdin`/`sys.stdout` -- there
+    would be no way to satisfy `_run_tui`'s existing interactive-terminal
+    guard, already covered by its own test, through `CliRunner`).
+    `InteractiveTUIApp.run()` is stubbed here rather than driven through a
+    real Textual `Pilot`, matching how Textual screen behavior is otherwise
+    tested in this codebase (via `App.run_test()`) -- this test is
+    specifically about `_run_tui()`'s own print-on-exit wiring."""
+    from ome_zarr_tools.commands.interactive import _run_tui
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr(
+        InteractiveTUIApp, "run", lambda self, *a, **k: "ome-zarr-tools inspect data.zarr"
+    )
+
+    _run_tui({})
+
+    assert "Copied invocation: ome-zarr-tools inspect data.zarr" in capsys.readouterr().out
+
+
+def test_tui_exit_without_copy_prints_nothing(monkeypatch, capsys):
+    from ome_zarr_tools.commands.interactive import _run_tui
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    monkeypatch.setattr(InteractiveTUIApp, "run", lambda self, *a, **k: None)
+
+    _run_tui({})
+
+    assert "Copied invocation" not in capsys.readouterr().out

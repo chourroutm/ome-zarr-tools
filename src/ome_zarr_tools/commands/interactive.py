@@ -119,7 +119,14 @@ def _run_tui(choices: dict[str, click.Command]) -> None:
     from ome_zarr_tools.tui.app import InteractiveTUIApp
 
     app = InteractiveTUIApp(choices)
-    app.run()
+    invocation = app.run()
+    if invocation:
+        # Reliable fallback for "Copy & exit": the clipboard-copy attempt
+        # (OSC 52) silently fails on terminals/multiplexers that don't pass
+        # it through (e.g. tmux/screen over SSH without `set-clipboard on`),
+        # with no way for the app to detect that -- printed here every time,
+        # once App.run() returning confirms the terminal is back to normal.
+        click.echo(f"Copied invocation: {invocation}")
 
 
 @click.command(name="interactive")

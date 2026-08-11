@@ -233,7 +233,7 @@ class CommandFormScreen(Screen[None]):
 
     def action_copy_and_exit(self) -> None:
         self.action_copy()
-        self.app.exit(result=None)
+        self.app.exit(result=self._invocation_text())
 
     def action_toggle_log(self) -> None:
         self._status_panel.toggle_log()
@@ -250,7 +250,7 @@ class CommandFormScreen(Screen[None]):
         self.app.exit(result=None)
 
 
-class InteractiveTUIApp(App[None]):
+class InteractiveTUIApp(App[str | None]):
     """Full-screen interface for `interactive --tui`. Commands run in-app; see tui/execution.py."""
 
     TITLE = "OME-Zarr Tools"
