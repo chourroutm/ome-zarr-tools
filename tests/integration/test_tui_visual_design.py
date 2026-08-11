@@ -198,13 +198,14 @@ async def test_every_prep_screen_shows_identity_frame_with_name_and_description(
 
 
 async def test_identity_frame_description_never_ellipsis_ed_even_when_long():
-    """The menu's 3-line prompt truncates a long description at 70 chars with an
-    ellipsis, but the command prep screen has room for the whole thing (unlike
-    /speckit-tasks' original T034/T036, which reused the menu's limit=70)."""
+    """Neither the menu's 3-line prompt (visually clipped via Rich `overflow=
+    "crop"`, never character-truncated with "...") nor the command prep
+    screen's identity frame (wraps to up to 3 lines instead) ever shortens
+    the description text itself -- unlike /speckit-tasks' original T034/T036,
+    which reused a hard `limit=70` character cutoff."""
     command = COMMANDS["apply_mask"]
     full_help = command.get_short_help_str(limit=10_000)
     assert len(full_help) > 70  # sanity: this command's help text is long enough to matter
-    assert command.get_short_help_str(limit=70).endswith("...")  # menu would truncate this
 
     app = _ScreenApp(lambda: CommandFormScreen(command))
     async with app.run_test() as pilot:

@@ -10,7 +10,7 @@ back into per-screen one-offs (the same reasoning as `003`'s
 | Element | Rule |
 |---|---|
 | Logo | Static ASCII art, Matryoshka-doll motif, shown above the `OptionList`. Hidden (not clipped) below a minimum terminal size. |
-| Menu entry | 3-line Rich `Option` prompt: line 1 = command name (bold), line 2 = `command.help`/`short_help` (blank if none), line 3 = blank spacer. |
+| Menu entry | 3-line Rich `Option` prompt: line 1 = command name (bold), line 2 = `command.help`/`short_help` (blank if none), line 3 = blank spacer. Line 2's `Text` is never character-truncated with an ellipsis — the full description, clipped visually at render time via `no_wrap=True, overflow="crop"` rather than a hard `limit=N` cutoff. |
 
 ## Field group frames (User Story 2)
 

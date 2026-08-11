@@ -61,7 +61,12 @@ def _menu_option_prompt(name: str, command: click.Command) -> Group:
     blank if the command has none), and a blank spacing line."""
     return Group(
         Text(f"▎ {name}", style="bold"),
-        Text(f"  {command.get_short_help_str(limit=70)}", style="dim"),
+        Text(
+            f"  {command.get_short_help_str(limit=10_000)}",
+            style="dim",
+            no_wrap=True,
+            overflow="crop",
+        ),
         Text(""),
     )
 

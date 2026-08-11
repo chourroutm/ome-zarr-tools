@@ -40,8 +40,28 @@ async def test_menu_option_prompt_is_3_lines_with_name_and_command_help():
         lines = _prompt_lines(option.prompt)
         assert len(lines) == 3
         assert first_name in lines[0]
-        assert COMMANDS[first_name].get_short_help_str(limit=70) in lines[1]
+        assert COMMANDS[first_name].get_short_help_str(limit=10_000) in lines[1]
         assert lines[2] == ""
+
+
+async def test_menu_option_prompt_long_description_is_overflow_hidden_not_truncated():
+    """apply_mask's help text is long enough to exceed a typical terminal
+    width; the full text is kept (never character-truncated with "..."),
+    with Rich's own overflow="crop" clipping it visually at render time."""
+    app = InteractiveTUIApp(COMMANDS)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        option_list = app.screen.query_one(OptionList)
+        option = option_list.get_option("apply_mask")
+        lines = _prompt_lines(option.prompt)
+        full_help = COMMANDS["apply_mask"].get_short_help_str(limit=10_000)
+        assert len(full_help) > 70  # sanity: long enough that a limit=70 cutoff would bite
+        assert full_help in lines[1]
+        assert not lines[1].endswith("...")
+
+        description = option.prompt.renderables[1]
+        assert description.no_wrap is True
+        assert description.overflow == "crop"
 
 
 async def test_menu_option_prompt_blank_second_line_for_command_with_no_help():

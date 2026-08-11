@@ -515,7 +515,9 @@ shows the Result screen.
 - **FR-002c**: A command menu entry's help-text line MUST be sourced
   directly from that command's existing CLI help text, never a separately
   maintained copy, and MUST render blank (not an error) for a command with
-  no help text.
+  no help text. It MUST NOT be character-truncated with an ellipsis — a
+  description too long for the row's width is clipped visually at render
+  time (overflow-hidden), not shortened at the text level.
 - **FR-003**: Every command form (generic and specialized) MUST present
   required fields grouped together and positioned before optional fields.
 - **FR-004**: Required fields MUST be enclosed in one titled, bordered
