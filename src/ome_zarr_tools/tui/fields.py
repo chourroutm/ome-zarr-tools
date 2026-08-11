@@ -24,6 +24,17 @@ from textual_autocomplete import DropdownItem, PathAutoComplete, TargetState
 
 from ome_zarr_tools.core.zarr_path import is_remote_path
 
+FIELD_GAP_CLASS = "field-gap"
+FIELD_GAP_CSS = f"""
+.{FIELD_GAP_CLASS} {{
+    margin-bottom: 1;
+}}
+"""
+"""Shared CSS for the blank line between fields within a group (spec 004 US2's
+field-group frames and, per explicit user direction, the Prompts window's
+fields too -- see ``metadata_screen.py``'s ``FixMetadataConfirmScreen``).
+Screens hosting spaced fields splice this into their own ``DEFAULT_CSS``."""
+
 REMOTE_SCHEME_COLORS: dict[str, str] = {
     "gs://": "blue",
     "gcs://": "blue",
@@ -363,7 +374,7 @@ def _frame_children(specs: list[FieldSpec]) -> list[Widget]:
         if spec.label:
             children.append(Label(spec.label))
         if index < len(specs) - 1:
-            spec.widget.styles.margin = (0, 0, 1, 0)
+            spec.widget.add_class(FIELD_GAP_CLASS)
         children.append(spec.widget)
         if spec.autocomplete is not None:
             children.append(spec.autocomplete)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -12,11 +13,63 @@ from ome_zarr_tools.core.zarr_path import ZarrPathParamType
 from ome_zarr_tools.io.ome_metadata import read_multiscales, validate
 
 
-def _parse_tuple_input(value: str, length: int) -> tuple[float, ...]:
+def parse_tuple_input(value: str, length: int) -> tuple[float, ...]:
     parts = [p.strip() for p in value.replace(",", " ").split()]
     if len(parts) != length:
         raise ValueError(f"Expected {length} values, got {len(parts)}")
     return tuple(float(p) for p in parts)
+
+
+@dataclass
+class PromptDefaults:
+    name: str
+    spatial_unit: str
+    voxel_size: tuple[float, float, float]
+    axis_names: list[str]
+    dataset_paths: list[str]
+
+
+def compute_default_prompt_values(multiscales: list[dict] | None) -> PromptDefaults:
+    """The default values fix_metadata's interactive prompts show, computed from
+    existing multiscale metadata (or built-in fallbacks if there is none).
+
+    Pure function extracted so the CLI's ``click.prompt(default=...)`` calls and
+    the TUI's Confirm screen (tui/screens/metadata_screen.py) compute identical
+    defaults from the same source, rather than duplicating this logic.
+    """
+    default_name = multiscales[0].get("name") if multiscales else None
+    name = default_name or "Image"
+
+    default_unit = None
+    if multiscales and multiscales[0].get("axes"):
+        default_unit = multiscales[0]["axes"][0].get("unit")
+    spatial_unit = default_unit or "micrometer"
+
+    default_voxel: tuple[float, ...] | None = None
+    if multiscales:
+        datasets = multiscales[0].get("datasets", [])
+        if datasets:
+            for transform in datasets[0].get("coordinateTransformations", []):
+                if transform.get("type") == "scale":
+                    default_voxel = tuple(float(x) for x in transform["scale"])
+                    break
+    voxel_size = default_voxel or (1.0, 1.0, 1.0)
+
+    axis_names = ["z", "y", "x"]
+    if multiscales and multiscales[0].get("axes"):
+        axis_names = [
+            axis.get("name", d) for axis, d in zip(multiscales[0]["axes"], axis_names, strict=False)
+        ]
+
+    dataset_paths = [d["path"] for d in multiscales[0]["datasets"]] if multiscales else ["0"]
+
+    return PromptDefaults(
+        name=name,
+        spatial_unit=spatial_unit,
+        voxel_size=(voxel_size[0], voxel_size[1], voxel_size[2]),
+        axis_names=axis_names,
+        dataset_paths=dataset_paths,
+    )
 
 
 def build_proposed_multiscales(
@@ -29,9 +82,9 @@ def build_proposed_multiscales(
     """Build the proposed ``multiscales`` metadata from these field values.
 
     Pure function, extracted so both this command's own prompt flow and the
-    TUI's diff/rich-view preview (tui/screens/metadata_screen.py) build the
-    exact same proposed metadata from the exact same inputs -- no duplicated
-    logic to drift out of sync.
+    TUI's Confirm screen (tui/screens/metadata_screen.py) build the exact same
+    proposed metadata from the exact same inputs -- no duplicated logic to
+    drift out of sync.
     """
     return [
         {
@@ -91,28 +144,15 @@ def fix_metadata(zarr_path: str) -> None:
 
     click.echo("\nEnter values (press Enter to keep the shown default).")
 
-    default_name = multiscales[0].get("name") if multiscales else None
-    name = click.prompt("Image name", default=default_name or "Image", show_default=True)
+    defaults = compute_default_prompt_values(multiscales)
 
-    default_unit = None
-    if multiscales and multiscales[0].get("axes"):
-        default_unit = multiscales[0]["axes"][0].get("unit")
-    spatial_unit = click.prompt(
-        "Spatial unit", default=default_unit or "micrometer", show_default=True
-    )
+    name = click.prompt("Image name", default=defaults.name, show_default=True)
+    spatial_unit = click.prompt("Spatial unit", default=defaults.spatial_unit, show_default=True)
 
-    default_voxel = None
-    if multiscales:
-        datasets = multiscales[0].get("datasets", [])
-        if datasets:
-            for transform in datasets[0].get("coordinateTransformations", []):
-                if transform.get("type") == "scale":
-                    default_voxel = tuple(float(x) for x in transform["scale"])
-                    break
-    default_voxel_str = " ".join(str(f) for f in default_voxel) if default_voxel else "1.0 1.0 1.0"
+    default_voxel_str = " ".join(str(f) for f in defaults.voxel_size)
     while True:
         try:
-            voxel_size = _parse_tuple_input(
+            voxel_size = parse_tuple_input(
                 click.prompt("Voxel size (z y x)", default=default_voxel_str, show_default=True),
                 3,
             )
@@ -120,19 +160,13 @@ def fix_metadata(zarr_path: str) -> None:
         except ValueError as exc:
             click.echo(f"Invalid input: {exc}. Try again.")
 
-    default_axes = ["z", "y", "x"]
-    if multiscales and multiscales[0].get("axes"):
-        default_axes = [
-            axis.get("name", d)
-            for axis, d in zip(multiscales[0]["axes"], default_axes, strict=False)
-        ]
-    axes_input = click.prompt("Axis names (space separated)", default=" ".join(default_axes))
+    axes_input = click.prompt("Axis names (space separated)", default=" ".join(defaults.axis_names))
     axis_names = [s.strip() for s in axes_input.replace(",", " ").split()][:3]
     if len(axis_names) != 3:
         click.echo("Warning: axis names length != 3, padding/truncating to 3 items.")
-        axis_names = (axis_names + default_axes)[:3]
+        axis_names = (axis_names + defaults.axis_names)[:3]
 
-    dataset_paths = [d["path"] for d in multiscales[0]["datasets"]] if multiscales else ["0"]
+    dataset_paths = defaults.dataset_paths
 
     proposed_multiscales = build_proposed_multiscales(
         name, spatial_unit, voxel_size, axis_names, dataset_paths

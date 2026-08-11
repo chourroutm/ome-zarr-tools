@@ -212,8 +212,11 @@ ComposeResult` for their finished-state command-specific widgets:
 `GenericResultScreen` (`from_images`/`extract`/`apply_mask`, and any
 command without a specialized screen) adds nothing beyond the shared log;
 `InspectResultScreen` adds the existing summary/JSON report panels;
-`FixMetadataResultScreen`/`MigrateResultScreen` add the diff that was
-applied; `ConfigResultScreen` adds the written config JSON.
+`FixMetadataResultScreen`/`MigrateResultScreen` add
+`tui/diff.py`'s `build_side_by_side_diff(before, after)` (the diff that
+was applied, shown as two side-by-side panels rather than a single
+unified log -- see "Command Confirm Screen" below); `ConfigResultScreen`
+adds the written config JSON.
 
 **Relationships**: Each prep screen's `action_run()` — after its existing
 required-field validation (FR-025) — constructs the matching
@@ -242,6 +245,84 @@ unchanged) — no `CommandResultScreen` is ever constructed in that case
 (FR-025). Run pressed again while a Result screen for that command is
 still pending re-navigates to it rather than constructing a second one
 (FR-025a).
+
+## Command Confirm Screen
+
+**Represents**: `fix_metadata`'s and `migrate`'s new screen between the
+prep screen (now argument-collection only, no live preview) and the
+existing Result screen. "Auto" mode (`migrate` -- its CLI is entirely
+flag-driven) shows the collected `ZARR_PATH` disabled, then either an
+"already at target version" message or the side-by-side diff. "Interactive"
+mode (`fix_metadata` -- its CLI has no flags beyond `ZARR_PATH`, prompting
+for everything else) shows the same disabled path field, then a
+Rich-styled window of editable fields mirroring those prompts, with a
+live side-by-side diff underneath.
+
+**Representation**: `tui/screens/metadata_screen.py`'s
+`_BaseConfirmScreen(Screen[None])` -- shared chrome: `build_identity_frame`,
+a disabled `Input(id="confirm-path")`, and a bottom bar
+(`StatusPanel` + `Footer`). `BINDINGS = [Binding("escape", "back", "Back
+to form"), *shared_bindings(primary_label="Confirm")]` (same
+first-binding-wins label-override technique as `CommandResultScreen`).
+Two subclasses:
+
+- `MigrateConfirmScreen(command, zarr_path, target_version)`: computes
+  `self._nothing_to_do = detect_version(group) == target_version` and, if
+  not, `preview_migration(...)` for the diff, both at `__init__` time (no
+  further input needed -- "auto"). `action_run()` (bound to the
+  relabeled F5) is a no-op while `_nothing_to_do`; otherwise disables
+  nothing further (there's nothing editable to disable), pushes
+  `MigrateResultScreen`, and calls `apply_migration` via
+  `run_in_background`, exactly like the old Form screen's Run used to.
+- `FixMetadataConfirmScreen(command, zarr_path)`: on `__init__`, calls
+  `compute_default_prompt_values(read_multiscales(group))` (the same
+  function the CLI's own `click.prompt(default=...)` calls use) to
+  pre-fill four `Input`s (`#prompt-name`/`#prompt-unit`/`#prompt-voxel`/
+  `#prompt-axes`, the first 3 tagged with `fields.py`'s shared
+  `.field-gap` CSS class for the same blank-line spacing the Required
+  frame's own fields use) inside a `Vertical` titled "Prompts
+  (fix_metadata)" -- the "Rich window" -- styled to mirror the Required
+  field-group frame's border style/spacing (`border: solid; margin: 1;
+  padding: 1; height: auto;`) but in green rather than red, to stay
+  visually distinct. Overflow is handled by the Confirm screen's own
+  outer `VerticalScroll`, not a nested scrollable region -- an earlier
+  design gave `#prompt-window` its own `max-height`/`overflow-y: auto`,
+  which the user found cropped the diff area below it instead. `on_input_changed()`
+  recomputes `build_proposed_multiscales(...)` from the current field
+  values and re-renders the side-by-side diff via `_refresh_diff()`,
+  serialized with an `asyncio.Lock` (`self._diff_lock`) since rapid
+  successive calls -- fast typing, or Restore Defaults setting all 4
+  fields in a row -- would otherwise let one call's
+  `remove_children()`/`mount()` interleave with another's and mount two
+  `#side-by-side-diff` widgets (`DuplicateIds`, caught empirically by
+  this feature's own tests). `action_restore_defaults()` (F4) sets a
+  `self._restoring` guard before writing all 4 fields back to their
+  computed defaults (suppressing each field's own individual
+  `on_input_changed`-triggered refresh) then refreshes once itself.
+  `action_run()` validates (`parse_tuple_input` for voxel size,
+  same-shape axis-name padding as the CLI) before disabling the 4 fields,
+  pushing `FixMetadataResultScreen`, and calling `write_metadata` via
+  `run_in_background`.
+
+Both subclasses keep `self._pending_result: CommandResultScreen | None`
+and the same re-navigate-instead-of-double-run guard as prep screens
+(FR-025a's pattern, applied here since Confirm -- not the prep screen --
+is now where execution actually happens).
+
+**Relationships**: `FixMetadataScreen`/`MigrateScreen`'s (Form)
+`action_run()` no longer executes anything -- after the existing
+required-field check, it constructs and `push_screen()`s the matching
+Confirm screen with the collected `zarr_path`
+(`+ target_version` for migrate) instead. `action_back()` on either
+Confirm screen pops back to that exact Form instance, values unchanged.
+
+**State transition**: Form's Run pressed (ZARR_PATH filled) → Confirm
+screen constructed and pushed, computing its content from the collected
+argument(s) immediately (no separate "loading" step) → user reviews (and,
+for `fix_metadata`, edits the prompt fields) → Confirm pressed → disables
+what's editable, pushes the Result screen, executes in the background →
+`on_done` → Result screen's `finish()`. Escape at any point before
+Confirm pops back to the unchanged Form screen.
 
 ## Restore Defaults
 

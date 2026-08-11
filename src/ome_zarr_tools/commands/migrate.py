@@ -20,8 +20,9 @@ def preview_migration(path: Path, target_version: str) -> dict:
     Calls the same ``ngff_zarr`` conversion the real command uses, but targets an
     in-memory ``zarr.storage.MemoryStore`` instead of the real temp-then-swap path
     -- zero filesystem I/O, nothing to clean up (research.md, verified). Used by
-    the TUI's diff/rich-view preview (tui/screens/metadata_screen.py); the real
-    command below is unmodified by this -- Run still invokes it normally.
+    the TUI's Confirm screen (tui/screens/metadata_screen.py) to show the
+    side-by-side diff before applying; the real command below is unmodified by
+    this -- Confirm still invokes it normally.
     """
     try:
         import ngff_zarr as nz

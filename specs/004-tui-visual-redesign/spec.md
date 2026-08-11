@@ -410,10 +410,91 @@ empty still blocks Run without navigating anywhere.
   since every field already shows its opening value, the visible result
   is unchanged.
 - What happens to a specialized screen's other live content (e.g.
-  `fix_metadata`/`migrate`'s diff view, `config`'s current-vs-defaults
-  view) when Restore Defaults reloads the screen? It resets too, along
-  with the fields — reloading rebuilds the whole screen from scratch, the
-  same as opening it fresh from the menu, not just the input fields.
+  `config`'s current-vs-defaults view) when Restore Defaults reloads the
+  screen? It resets too, along with the fields — reloading rebuilds the
+  whole screen from scratch, the same as opening it fresh from the menu,
+  not just the input fields. (`fix_metadata`/`migrate`'s prep screens no
+  longer carry live preview content of their own — see User Story 8 — so
+  for them this now just resets the collected arguments.)
+
+### User Story 8 - Confirm before you commit changes (Priority: P8)
+
+A user fills in `fix_metadata`'s or `migrate`'s prep screen — just the
+arguments those commands actually take (`ZARR_PATH`, and `migrate`'s
+`--target_version`) — and presses Run. Instead of executing right away,
+the app takes them to a dedicated Command Confirm screen for that
+command, showing what would happen before anything is written. For
+`migrate` (auto mode — its CLI needs no further interactive input beyond
+its flags), the Confirm screen shows the `ZARR_PATH` in a disabled field,
+then either a message that the dataset is already at the target version
+(nothing to do) or a side-by-side diff of the current metadata beside
+what migrating would produce. For `fix_metadata` (interactive mode — its
+CLI has no flags at all beyond `ZARR_PATH`, prompting interactively for
+everything else), the Confirm screen shows the same disabled path field,
+then a Rich-styled window of editable fields mirroring the CLI's own
+prompts (image name, spatial unit, voxel size, axis names) pre-filled
+with the same defaults those prompts show, with a live side-by-side diff
+below that updates as the fields are edited. On either screen, a
+"Confirm" shortcut (in place of "Run") is what actually executes the
+change and takes the user to that command's existing Result screen;
+`fix_metadata`'s Confirm screen also gets a Restore Defaults shortcut
+that resets its fields back to the computed defaults. An "escape" shortcut
+returns to the prep screen beneath, with its field values unchanged.
+
+**Why this priority**: The most recently requested change, and scoped
+narrowly to the two commands that mutate a dataset's metadata in a way
+worth reviewing first — every other command keeps its existing immediate-Run
+behavior (User Story 7) unchanged.
+
+**Independent Test**: Open `migrate`'s prep screen, fill in `ZARR_PATH`,
+press Run, and confirm the app shows the Confirm screen (not the Result
+screen) with the path disabled and either the "nothing to do" message or
+a side-by-side diff, depending on whether the dataset is already at the
+target version; press Confirm and confirm it then executes and shows the
+Result screen. Separately, open `fix_metadata`'s prep screen, fill in
+`ZARR_PATH`, press Run, and confirm its Confirm screen shows editable
+prompt-style fields pre-filled with computed defaults and a live diff
+that updates as they're edited; press Confirm and confirm it writes and
+shows the Result screen.
+
+**Acceptance Scenarios**:
+
+1. **Given** `fix_metadata`'s or `migrate`'s prep screen with `ZARR_PATH`
+   filled in, **When** the user presses Run, **Then** the app navigates
+   to that command's Confirm screen rather than executing anything —
+   nothing on disk changes yet.
+2. **Given** the Confirm screen for either command, **When** it renders,
+   **Then** `ZARR_PATH` is shown in a disabled (non-editable) field,
+   carried over from the prep screen.
+3. **Given** `migrate`'s Confirm screen where the dataset is already at
+   the target version, **When** it renders, **Then** it shows a message
+   that there is nothing to do, with no diff panels; pressing Confirm in
+   this state does nothing (no execution, no navigation).
+4. **Given** `migrate`'s Confirm screen where migration is needed,
+   **When** it renders, **Then** it shows two side-by-side panels — the
+   current metadata and what migrating would produce.
+5. **Given** `fix_metadata`'s Confirm screen, **When** it renders,
+   **Then** it shows editable fields for image name, spatial unit, voxel
+   size, and axis names, each pre-filled with the same default the CLI's
+   own interactive prompt for that value would show.
+6. **Given** `fix_metadata`'s Confirm screen, **When** the user edits any
+   of those fields, **Then** the side-by-side diff below updates to
+   reflect the new proposed metadata.
+7. **Given** `fix_metadata`'s Confirm screen with a field edited away
+   from its default, **When** the user triggers Restore Defaults,
+   **Then** every field resets to its originally computed default and
+   the diff updates to match.
+8. **Given** `fix_metadata`'s Confirm screen with an unparseable voxel
+   size, **When** the user presses Confirm, **Then** nothing executes and
+   an inline error is shown — the same "block, don't crash" precedent
+   already established for invalid input elsewhere in this app.
+9. **Given** either Confirm screen in a state where executing is valid,
+   **When** the user presses Confirm, **Then** the change is applied and
+   the app navigates to that command's existing Result screen, exactly as
+   User Story 7 already describes for every other command's Run.
+10. **Given** either Confirm screen, **When** the user presses its escape
+    shortcut, **Then** the app returns to the prep screen beneath it with
+    its field values unchanged.
 
 ## Requirements *(mandatory)*
 
@@ -566,6 +647,54 @@ empty still blocks Run without navigating anywhere.
   resetting individual field values.
 - **FR-027a**: Restore Defaults MUST have no effect while the screen's
   fields are disabled for the duration of a run.
+- **FR-028**: `fix_metadata`'s and `migrate`'s prep screens MUST collect
+  only the arguments those commands actually take (`ZARR_PATH`, and
+  `migrate`'s `--target_version`) — no live preview content of any kind —
+  and MUST NOT execute anything when Run is pressed; every other
+  command's prep screen is unaffected and keeps User Story 7's
+  immediate-Run behavior unchanged.
+- **FR-029**: Pressing Run on `fix_metadata`'s or `migrate`'s prep screen
+  (once its required fields are filled) MUST navigate to a Command
+  Confirm screen for that command, sharing the same identity-frame +
+  bottom-bar template as the prep and Result screens, instead of
+  executing directly.
+- **FR-030**: Every Command Confirm screen MUST show the collected
+  `ZARR_PATH` in a disabled (non-editable) field.
+- **FR-031**: `migrate`'s Confirm screen ("auto" mode — its CLI needs no
+  further interactive input beyond its flags) MUST show either: (a) a
+  message that the dataset is already at the target version, when true,
+  with no diff shown, or (b) two side-by-side panels — current metadata
+  and what migrating would produce — when a migration is actually needed.
+- **FR-032**: `fix_metadata`'s Confirm screen ("interactive" mode — its
+  CLI has no flags beyond `ZARR_PATH`, prompting for everything else)
+  MUST show editable fields for image name, spatial unit, voxel size, and
+  axis names, each pre-filled with the same default value the CLI's own
+  `click.prompt()` calls would show, computed by the same shared function
+  the CLI uses. Editing any of these fields MUST update a live
+  side-by-side diff (current metadata vs. the proposed result) shown
+  below them.
+- **FR-032a**: `fix_metadata`'s Confirm screen MUST provide a Restore
+  Defaults action that resets its four fields to their originally
+  computed defaults (and refreshes the diff to match), independent of
+  the prep screen's own Restore Defaults (FR-027).
+- **FR-033**: Every Command Confirm screen MUST provide a "Confirm"
+  shortcut (in place of "Run") that executes the change — writing
+  metadata or applying the migration — and, on success or failure,
+  navigates to that command's existing Result screen (User Story 7),
+  exactly as pressing Run already does for every other command.
+  `fix_metadata`'s Confirm action MUST validate its fields first (e.g.
+  voxel size must parse as three numbers) and MUST NOT execute or
+  navigate anywhere if validation fails, showing an inline error instead.
+  `migrate`'s Confirm action MUST be a no-op (no execution, no
+  navigation) while its screen is in the "already at target version"
+  state.
+- **FR-034**: A Command Confirm screen MUST provide a way back to the
+  prep screen beneath it (its escape shortcut) that leaves every field's
+  value exactly as it was, matching the existing Back-to-form precedent
+  (FR-026).
+- **FR-035**: The side-by-side diff (FR-031/FR-032) MUST also replace the
+  single unified diff view `fix_metadata`'s and `migrate`'s Result
+  screens previously used, so both screens present diffs the same way.
 
 ### Key Entities
 
@@ -615,6 +744,24 @@ empty still blocks Run without navigating anywhere.
   blank), achieved by reloading the whole prep screen rather than
   resetting individual field values; has no effect while fields are
   disabled during a run.
+- **Command Confirm Screen**: `fix_metadata`'s and `migrate`'s screen
+  between the prep and Result screens, sharing the same identity-frame +
+  bottom-bar template. Shows the collected `ZARR_PATH` in a disabled
+  field, then either "auto" mode content (`migrate`: an
+  "already at target version" message, or the side-by-side diff) or
+  "interactive" mode content (`fix_metadata`: a Rich-styled window of
+  fields mirroring the CLI's own prompts, pre-filled with the same
+  defaults, plus a live side-by-side diff). A "Confirm" shortcut (in
+  place of "Run") executes and navigates to the Result screen;
+  `fix_metadata`'s screen also gets its own Restore Defaults, independent
+  of the prep screen's.
+- **Side-by-Side Diff**: Two bordered, titled panels ("Current" /
+  "Proposed") shown next to each other, each pretty-printed JSON with
+  replaced/removed lines highlighted red on the left and
+  replaced/added lines highlighted green on the right; used by the
+  Command Confirm screen (auto mode and interactive mode alike) and by
+  `fix_metadata`'s/`migrate`'s Result screens, replacing the single
+  unified diff view those Result screens previously used.
 
 ## Success Criteria *(mandatory)*
 
@@ -657,8 +804,11 @@ empty still blocks Run without navigating anywhere.
   with the correct command name and description, verified by screen
   inspection.
 - **SC-010**: 100% of command runs, whether they succeed or fail, navigate
-  to that command's Result screen immediately on Run, and end there
-  showing the correct success/failure indicator once finished.
+  to that command's Result screen immediately on Run (or, for
+  `fix_metadata`/`migrate` specifically, to their Confirm screen —
+  User Story 8 — with the Result screen reached one step later via
+  Confirm), and end there showing the correct success/failure indicator
+  once finished.
 - **SC-011**: Every command's Result screen shows that command's specific
   output (report/diff/config JSON/log) with no cross-command mixing,
   verified per command.
@@ -672,6 +822,18 @@ empty still blocks Run without navigating anywhere.
   content as their originating prep screen.
 - **SC-015**: 100% of command prep screens' Restore Defaults action resets
   every field to its opening value, verified across all command forms.
+- **SC-016**: 100% of the time, pressing Run on `fix_metadata`'s or
+  `migrate`'s prep screen navigates to that command's Confirm screen
+  without executing anything — verified by confirming the dataset is
+  byte-for-byte unchanged until Confirm is actually pressed.
+- **SC-017**: `migrate`'s Confirm screen correctly distinguishes the
+  "already at target version" case (message, no diff, Confirm is a
+  no-op) from the "migration needed" case (side-by-side diff shown,
+  Confirm executes), verified against real datasets in both states.
+- **SC-018**: `fix_metadata`'s Confirm screen's four prompt fields always
+  start pre-filled with the same default values the CLI's own
+  interactive prompts would show for the same dataset, verified by
+  comparing against `compute_default_prompt_values()`'s output directly.
 
 ## Assumptions
 
@@ -810,3 +972,24 @@ empty still blocks Run without navigating anywhere.
   Result screen and re-navigates to it — the simplest option that can't
   orphan a cancelled run's Result screen waiting forever for a result
   that will never arrive.
+- **"Auto" vs. "interactive" Confirm mode is fixed per-command, not a
+  runtime toggle**: `migrate`'s CLI is entirely flag-driven (one
+  `--target_version` option, no `click.prompt()` calls) so its Confirm
+  screen never needs further input beyond what the prep screen already
+  collected — "auto". `fix_metadata`'s CLI has no flags beyond
+  `ZARR_PATH` at all, prompting interactively for everything else — its
+  Confirm screen always needs the Rich prompt window — "interactive".
+  Since which mode applies is entirely determined by each command's own
+  existing CLI shape, there's no scenario where the same command would
+  need both, so no mode-selection UI exists.
+- **Confirm executes directly, with no separate subsequent Run press**:
+  per explicit user direction — Form's Run navigates to Confirm; Confirm
+  (not a further Run) is the single action that both locks in the
+  reviewed values and executes them. This differs from an earlier phrase
+  in this session ("fix_metadata should also wait for Run") which turned
+  out to describe Form waiting for its own Run press before navigating
+  to Confirm, not a second Run step after Confirm.
+- **Scope limited to `fix_metadata`/`migrate`**: per the user's explicit
+  instruction to ask before extending this to other commands, no other
+  command's prep screen was changed — every other command keeps User
+  Story 7's immediate-Run behavior unchanged.

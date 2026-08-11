@@ -250,6 +250,8 @@ async def test_inspect_result_screen_shows_summary_and_json_report(
 
 
 async def test_fix_metadata_result_screen_shows_applied_diff(sample_ome_zarr):
+    from ome_zarr_tools.tui.screens.metadata_screen import FixMetadataConfirmScreen
+
     app = _ScreenApp(lambda: FixMetadataScreen(COMMANDS["fix_metadata"]))
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -260,13 +262,20 @@ async def test_fix_metadata_result_screen_shows_applied_diff(sample_ome_zarr):
         await pilot.press("f5")
         await pilot.pause()
 
+        assert isinstance(app.screen, FixMetadataConfirmScreen)
+        await pilot.press("f5")
+        await pilot.pause()
+
         assert isinstance(app.screen, FixMetadataResultScreen)
         result_screen = app.screen
         await _wait_for(pilot, lambda: result_screen._finished)
-        assert len(result_screen.query("Static")) >= 1
+        assert len(result_screen.query("#diff-current")) == 1
+        assert len(result_screen.query("#diff-proposed")) == 1
 
 
 async def test_migrate_result_screen_shows_applied_diff(legacy_v2_ome_zarr):
+    from ome_zarr_tools.tui.screens.metadata_screen import MigrateConfirmScreen
+
     app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -281,10 +290,21 @@ async def test_migrate_result_screen_shows_applied_diff(legacy_v2_ome_zarr):
         await pilot.press("f5")
         await pilot.pause()
 
+        assert isinstance(app.screen, MigrateConfirmScreen)
+        await pilot.press("f5")
+        await pilot.pause()
+
         assert isinstance(app.screen, MigrateResultScreen)
         result_screen = app.screen
         await _wait_for(pilot, lambda: result_screen._finished)
-        assert len(result_screen.query("Static")) >= 1
+        assert len(result_screen.query("#diff-current")) == 1
+        # #result-content defaults to Vertical's `height: 1fr; overflow: hidden
+        # hidden;` unless overridden -- would silently clip a diff taller than
+        # the viewport instead of leaving it reachable via the outer scroll.
+        current_panel = result_screen.query_one("#diff-current")
+        content_line_count = str(current_panel.content).count("\n")
+        assert current_panel.region.height >= content_line_count
+        assert len(result_screen.query("#diff-proposed")) == 1
 
 
 async def test_config_result_screen_shows_written_json(monkeypatch, tmp_path):

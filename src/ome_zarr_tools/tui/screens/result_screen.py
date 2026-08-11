@@ -37,6 +37,9 @@ class CommandResultScreen(Screen[None]):
         dock: bottom;
         height: auto;
     }
+    #result-content {
+        height: auto;
+    }
     """
 
     def __init__(self, command: click.Command) -> None:

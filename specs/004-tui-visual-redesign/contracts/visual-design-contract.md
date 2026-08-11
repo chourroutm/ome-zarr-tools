@@ -21,7 +21,7 @@ back into per-screen one-offs (the same reasoning as `003`'s
 | Title | `border_title = "Required"` / `"Optional"`, exact strings, so tests can assert on them. |
 | Subtitle | Required frame only: `border_subtitle = f"{n} remaining"`, `n` = count of required fields currently empty. Recomputed on every required-field value change, including reaching `"0 remaining"`. Optional frame: no subtitle. |
 | Sizing | `height: auto;` (sized to content, never expands to fill the screen) plus `margin: 1;`/`padding: 1;` (1 character on every side), on both frames. |
-| Field spacing | Each field's widget gets `margin-bottom: 1` (a blank line) except the last field in the group, so fields read as visually separate without a trailing gap before the frame's own bottom padding. |
+| Field spacing | Each field's widget gets `fields.py`'s `.field-gap` CSS class (`FIELD_GAP_CLASS`/`FIELD_GAP_CSS`, `margin-bottom: 1;`) except the last field in the group, so fields read as visually separate without a trailing gap before the frame's own bottom padding. Shared, not per-frame-type: `fix_metadata`'s Confirm screen's Prompts window (User Story 8) reuses this exact same CSS class for its own fields. |
 
 ## Field labels (User Story 3)
 
@@ -74,8 +74,30 @@ back into per-screen one-offs (the same reasoning as `003`'s
 |---|---|
 | Trigger | Constructed and `push_screen()`-ed from `action_run()` *immediately* once required-field validation passes (FR-022) — not after the command finishes. Never constructed when Run is blocked by that validation (FR-025). A second Run press while that command's Result screen is still pending re-navigates to the existing instance rather than constructing a new one (FR-025a). |
 | Base class | `tui/screens/result_screen.py`'s `CommandResultScreen(Screen[None])` — yields the same `build_identity_frame(command)` as the prep screen (FR-022a), first, in both states. Pending state: an embedded `StatusPanel` (progress bar/sparkline, started via `begin()`). Finished state (after `finish(result)`): a success/failure `Label` + `compose_result_content()`'s output + the same `StatusPanel` (stopped, its log still toggleable). `BINDINGS` overrides `escape`'s label to "Back to form" by listing it before `*shared_bindings()` (same key, key/action unchanged, only the displayed label differs — verified empirically, see research.md). |
-| Subclass content | `compose_result_content()` override per command, shown only once finished: `GenericResultScreen` (from_images/extract/apply_mask) — none beyond the shared `StatusPanel` log; `InspectResultScreen` — summary/JSON report panels; `FixMetadataResultScreen`/`MigrateResultScreen` — the applied diff; `ConfigResultScreen` — the written config JSON. |
-| Back to form | Pops the Result screen off the stack, returning to the exact prep-screen instance beneath it with every field value unchanged, from either the pending or finished state (FR-026). |
+| Subclass content | `compose_result_content()` override per command, shown only once finished: `GenericResultScreen` (from_images/extract/apply_mask) — none beyond the shared `StatusPanel` log; `InspectResultScreen` — summary/JSON report panels; `FixMetadataResultScreen`/`MigrateResultScreen` — the applied diff, as the side-by-side panels (User Story 8, FR-035); `ConfigResultScreen` — the written config JSON. |
+| Back to form | Pops the Result screen off the stack, returning to the exact prep-screen instance beneath it with every field value unchanged, from either the pending or finished state (FR-026). For `fix_metadata`/`migrate`, that "prep-screen instance beneath it" is the Confirm screen (User Story 8), not the Form screen — Confirm is what pushed the Result screen. |
+
+## Command Confirm screen (User Story 8)
+
+| Element | Rule |
+|---|---|
+| Trigger | `fix_metadata`'s/`migrate`'s Form screens' `action_run()` no longer executes (FR-028) — after required-field validation, it constructs and `push_screen()`s the matching Confirm screen instead (FR-029). No other command's Form screen is affected. |
+| Base | `tui/screens/metadata_screen.py`'s `_BaseConfirmScreen(Screen[None])` — `build_identity_frame(command)`, a disabled `Input(id="confirm-path")` (FR-030), and the same bottom-bar template (`StatusPanel` + `Footer`). `BINDINGS = [Binding("escape", "back", "Back to form"), *shared_bindings(primary_label="Confirm")]` — same first-binding-wins label-override technique as the Result screen. |
+| Auto mode (`migrate`) | `MigrateConfirmScreen`: either an "already at target version" message (no diff, Confirm is a no-op) or the side-by-side diff of current vs. migrated attrs (FR-031). No Restore Defaults binding — nothing is editable here. |
+| Interactive mode (`fix_metadata`) | `FixMetadataConfirmScreen`: a window titled "Prompts (fix_metadata)", styled to mirror the Required field-group frame's border style/spacing (`border: solid; margin: 1; padding: 1; height: auto;`) but in green rather than red, to stay visually distinct while still reading as "the same kind of thing." The blank-line spacing between its 4 fields (all but the last) reuses `fields.py`'s shared `.field-gap` CSS class — the exact same rule the Required frame's own fields use (`FIELD_GAP_CSS`), not a separately maintained copy — pre-filled via `compute_default_prompt_values()` — the same function the CLI's own prompts use — plus a live side-by-side diff below that updates on every field edit (FR-032). Overflow (a tall window, or a tall diff) is handled by the Confirm screen's own outer `VerticalScroll`, not a nested independently-scrollable region. `F4` Restore Defaults resets the 4 fields and the diff (FR-032a), independent of the Form screen's own Restore Defaults. |
+| Confirm action | `F5`, relabeled "Confirm". Validates first for `fix_metadata` (voxel size must parse as 3 numbers; blocks with an inline error otherwise) and is a no-op for `migrate` while nothing-to-do; otherwise disables what's editable, `push_screen()`s the existing Result screen, and executes (`write_metadata`/`apply_migration`) via `run_in_background`, exactly as a prep screen's Run used to (FR-033). |
+| Pending guard | Same re-navigate-instead-of-double-run guard as prep screens (`self._pending_result`), since Confirm is now where execution happens. |
+| Back | `escape` pops back to the exact Form-screen instance beneath, every field value unchanged (FR-034). |
+
+## Side-by-side diff (User Story 8)
+
+| Element | Rule |
+|---|---|
+| Builder | `tui/diff.py`'s `build_side_by_side_diff(before, after) -> Horizontal` — two `Static` panels (`#diff-current`/`#diff-proposed`, `border_title = "Current"`/`"Proposed"`), each pretty-printed JSON, `width: 1fr;` each. |
+| Highlighting | `difflib.SequenceMatcher` opcodes: non-`"equal"` lines styled red on the left, styled green on the right; `"equal"` lines unstyled on both. |
+| Line alignment | Each opcode block pads the shorter side with blank lines up to `max(len(before_block), len(after_block))`, so both panels always have the same total line count and an `"equal"` block after a `"replace"`/`"insert"`/`"delete"` lands on the same row in both panels rather than drifting apart. |
+| Sizing | The outer `Horizontal` (`#side-by-side-diff`) and both panels get explicit `height: auto;` — `Horizontal`/`Vertical` default to `height: 1fr; overflow: hidden hidden;`, which silently clipped a diff taller than its container instead of letting the enclosing screen's own scroll region reach the rest of it (found and fixed alongside this feature; `#confirm-diff`/`#result-content`, the `Vertical`s hosting this widget on the Confirm and Result screens respectively, needed the same explicit `height: auto;` fix). `margin: 0 1;` on the outer `Horizontal` gives the `Current` panel the same left margin as the `Proposed` panel's right margin. |
+| Used by | `MigrateConfirmScreen`'s/`FixMetadataConfirmScreen`'s diff area, and `FixMetadataResultScreen`'s/`MigrateResultScreen`'s `compose_result_content()` — replacing the single unified diff log (`tui/diff.py`'s old `diff_lines`/`render_diff`, removed) those Result screens previously used (FR-035). |
 
 ## Restore Defaults (User Story 7)
 
@@ -104,6 +126,15 @@ back into per-screen one-offs (the same reasoning as `003`'s
   human-readable labels, identity frame, `action_restore_defaults()`,
   and its `CommandResultScreen` subclass (`InspectResultScreen`,
   `FixMetadataResultScreen`, `MigrateResultScreen`, `ConfigResultScreen`)
+- `tui/screens/metadata_screen.py` (User Story 8) — also:
+  `_BaseConfirmScreen`, `MigrateConfirmScreen`, `FixMetadataConfirmScreen`;
+  `FixMetadataScreen`/`MigrateScreen`'s `action_run()` pushes these
+  instead of executing
+- `tui/diff.py` (User Story 8) — `build_side_by_side_diff(before, after)`
+  (replaced the old `diff_lines`/`render_diff`)
+- `commands/fix_metadata.py` (User Story 8) — `compute_default_prompt_values()`,
+  `PromptDefaults`, `parse_tuple_input()` (made non-private), all reused
+  by both the CLI's own prompts and `FixMetadataConfirmScreen`
 - `tui/status.py` — `StatusPanel`, reused unchanged (no new methods needed)
 
 ## Who verifies this contract

@@ -18,10 +18,12 @@ in priority order. User Story 1 is already implemented and committed
 are pre-checked.
 
 **Status**: User Stories 2-7 (T004-T052) implemented via `/speckit-implement`
-— all new/changed behavior covered by tests, full suite (144 tests) green,
-`ruff`/`mypy` clean. T053 (a real-terminal manual pass, beyond the extensive
-headless/`Pilot`-driven verification already exercised by the test suite and
-during implementation) is the one item still open.
+— all new/changed behavior covered by tests, full suite (144 tests at the
+time) green, `ruff`/`mypy` clean. T053 (a real-terminal manual pass, beyond
+the extensive headless/`Pilot`-driven verification already exercised by the
+test suite and during implementation) is the one item still open. User Story
+8 (below) was added afterward, directly; full suite is now 168 tests, still
+green.
 
 **Post-implementation tweaks** (direct, outside `/speckit-implement`, still
 covered by tests/quality gates): field-group frame borders changed from
@@ -55,6 +57,51 @@ re-roots on submit (Enter) if the typed value is a valid directory —
 avoiding any dependency on a specific key or click target entirely, and
 letting the user jump straight to any path rather than one level at a
 time.
+
+**User Story 8 — Command Confirm screen** (added directly, outside a
+formal `/speckit-specify`/`/speckit-implement` cycle, per the user's
+detailed request + follow-up clarification; spec.md/data-model.md/the
+contract updated to match): `fix_metadata`'s and `migrate`'s prep
+screens now only collect arguments (`ZARR_PATH`, `+ --target_version`)
+and wait for Run — no more live diff/rich-view preview there (FR-028).
+Run navigates to a new Command Confirm screen (`F5` relabeled
+"Confirm") instead of executing directly (FR-029): `migrate` ("auto"
+mode, since its CLI is flag-driven) shows a disabled path field plus
+either "already at target version" or the side-by-side diff (FR-031);
+`fix_metadata` ("interactive" mode, since its CLI has no flags beyond
+`ZARR_PATH` and prompts for everything else) shows the same disabled
+path field plus a Rich-styled window of editable fields mirroring those
+prompts, pre-filled via a new shared `compute_default_prompt_values()`
+(FR-032), with a live side-by-side diff and its own Restore Defaults
+(FR-032a). Confirm executes and pushes the existing Result screen
+(FR-033), which — along with the Confirm screen itself — now shows
+diffs as two side-by-side panels (`tui/diff.py`'s new
+`build_side_by_side_diff()`, FR-035) instead of the old unified
+`diff_lines`/`render_diff` log (removed). No other command's screen was
+touched, per explicit instruction. Extracted `fix_metadata.py`'s
+prompt-default logic into `compute_default_prompt_values()`/
+`PromptDefaults` and made `parse_tuple_input` public, reused by both the
+CLI and the new Confirm screen. Also fixed a pre-existing bug surfaced
+while testing this: `extract`/`fix_metadata`/`migrate`/`inspect`'s
+`zarr_path` argument was missing `file_okay=False` (unlike
+`apply_mask`'s already-correct fields), so their Browse picker's
+directory-selection never dismissed the picker — fixed by adding
+`file_okay=False` to all four, matching `apply_mask`'s pattern.
+Follow-up styling refinements per the user: field-to-field spacing
+extracted into a shared `.field-gap` CSS class (`fields.py`'s
+`FIELD_GAP_CSS`) so the Prompts window's fields visually match the
+Required frame's exactly, not a separately duplicated margin; the
+Prompts window mirrors the Required frame's border style/spacing but in
+green rather than red; the side-by-side diff gained matching left/right
+margins and line-padding so replaced blocks of differing length don't
+leave the two panels' later lines on different rows; and a real bug was
+found and fixed where `Vertical`/`Horizontal`'s default `height: 1fr;
+overflow: hidden hidden;` silently clipped a diff taller than its
+container (`#confirm-diff`, `#result-content`, and the diff's own
+`Horizontal` all needed explicit `height: auto;`) — overflow is now
+handled entirely by each screen's own outer `VerticalScroll`, not a
+nested, independently-scrollable region (an intermediate design that
+also cropped content instead of making it reachable).
 
 ## Format: `[ID] [P?] [Story] Description`
 

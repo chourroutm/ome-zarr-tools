@@ -1,38 +1,9 @@
-import json
-from pathlib import Path
-
 import zarr
-from textual.app import App
-from textual.widgets import Input, TextArea
 
-from ome_zarr_tools.cli import cli
 from ome_zarr_tools.commands.fix_metadata import build_proposed_multiscales
 from ome_zarr_tools.commands.migrate import preview_migration
 from ome_zarr_tools.io.ome_metadata import read_multiscales
-from ome_zarr_tools.tui.screens.metadata_screen import (
-    FixMetadataResultScreen,
-    FixMetadataScreen,
-    MigrateScreen,
-)
-
-COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
-
-
-class _FixMetadataApp(App):
-    def on_mount(self) -> None:
-        self.push_screen(FixMetadataScreen(COMMANDS["fix_metadata"]))
-
-
-class _MigrateApp(App):
-    def on_mount(self) -> None:
-        self.push_screen(MigrateScreen(COMMANDS["migrate"]))
-
-
-async def _wait_for(pilot, predicate, attempts: int = 50) -> None:
-    for _ in range(attempts):
-        if predicate():
-            return
-        await pilot.pause()
+from ome_zarr_tools.tui.diff import build_side_by_side_diff
 
 
 def test_build_proposed_multiscales_matches_inline_shape(sample_ome_zarr):
@@ -63,118 +34,76 @@ def test_preview_migration_matches_real_migration_result(legacy_v2_ome_zarr):
     assert sorted((legacy_v2_ome_zarr / "0").rglob("*")) == before_bytes
 
 
-async def test_fix_metadata_screen_diff_for_dataset_with_existing_metadata(sample_ome_zarr):
-    app = _FixMetadataApp()
+async def test_side_by_side_diff_has_current_and_proposed_panels():
+    from textual.app import App
+    from textual.screen import Screen
+    from textual.widgets import Static
+
+    class _Screen(Screen):
+        def compose(self):
+            yield build_side_by_side_diff({"a": 1}, {"a": 1, "b": 2})
+
+    class _App(App):
+        def on_mount(self) -> None:
+            self.push_screen(_Screen())
+
+    app = _App()
     async with app.run_test() as pilot:
         await pilot.pause()
-        screen = app.screen
-        path_input = screen.query_one("#field-zarr_path", Input)
-        path_input.focus()
-        await pilot.press(*str(sample_ome_zarr))
-        await pilot.pause()
-
-        assert screen._before is not None
-        rich_view = screen.query_one("#rich-view", TextArea)
-        proposed = json.loads(rich_view.text)
-        assert proposed[0]["name"]  # populated from existing metadata's defaults
+        panels = list(app.screen.query(Static))
+        assert len(panels) == 2
+        assert panels[0].border_title == "Current"
+        assert panels[1].border_title == "Proposed"
+        assert '"a": 1' in str(panels[0].content)
+        assert '"b": 2' in str(panels[1].content)
+        assert '"b": 2' not in str(panels[0].content)
 
 
-async def test_fix_metadata_screen_diff_for_dataset_with_no_prior_metadata(tmp_path: Path):
-    empty_zarr = tmp_path / "empty.zarr"
-    zarr.open_group(str(empty_zarr), mode="w")  # a group with no multiscales metadata at all
+async def test_side_by_side_diff_pads_shorter_side_to_keep_lines_aligned():
+    """A replaced block with different line counts on each side (here the
+    nested "a" object grows from 1 key to 3) must not leave the two panels'
+    later, unchanged lines ("z": 9) on different rows."""
+    from textual.app import App
+    from textual.screen import Screen
+    from textual.widgets import Static
 
-    app = _FixMetadataApp()
+    before = {"a": {"x": 1}, "z": 9}
+    after = {"a": {"x": 1, "y": 2, "w": 3}, "z": 9}
+
+    class _Screen(Screen):
+        def compose(self):
+            yield build_side_by_side_diff(before, after)
+
+    class _App(App):
+        def on_mount(self) -> None:
+            self.push_screen(_Screen())
+
+    app = _App()
     async with app.run_test() as pilot:
         await pilot.pause()
-        screen = app.screen
-        path_input = screen.query_one("#field-zarr_path", Input)
-        path_input.focus()
-        await pilot.press(*str(empty_zarr))
-        await pilot.pause()
-
-        assert screen._before is None  # empty "before" state, not skipped
-        rich_view = screen.query_one("#rich-view", TextArea)
-        proposed = json.loads(rich_view.text)
-        assert proposed[0]["name"] == "Image"  # falls back to defaults
+        panels = list(app.screen.query(Static))
+        left_lines = str(panels[0].content).splitlines()
+        right_lines = str(panels[1].content).splitlines()
+        assert len(left_lines) == len(right_lines)
+        assert left_lines.index('  "z": 9') == right_lines.index('  "z": 9')
 
 
-async def test_fix_metadata_screen_invalid_edit_blocks_run(sample_ome_zarr):
-    app = _FixMetadataApp()
+async def test_side_by_side_diff_no_before_shows_placeholder_on_current_panel():
+    from textual.app import App
+    from textual.screen import Screen
+    from textual.widgets import Static
+
+    class _Screen(Screen):
+        def compose(self):
+            yield build_side_by_side_diff(None, {"a": 1})
+
+    class _App(App):
+        def on_mount(self) -> None:
+            self.push_screen(_Screen())
+
+    app = _App()
     async with app.run_test() as pilot:
         await pilot.pause()
-        screen = app.screen
-        path_input = screen.query_one("#field-zarr_path", Input)
-        path_input.focus()
-        await pilot.press(*str(sample_ome_zarr))
-        await pilot.pause()
-
-        rich_view = screen.query_one("#rich-view", TextArea)
-        rich_view.text = "{not valid json"
-        await pilot.pause()
-
-        await pilot.press("f5")
-        await pilot.pause()
-        assert screen._log_lines == []  # Run was blocked, nothing executed
-
-        # Fix it and confirm Run now succeeds.
-        proposed = [
-            {
-                "version": "0.4",
-                "name": "FixedName",
-                "axes": [
-                    {"name": "z", "type": "space", "unit": "micrometer"},
-                    {"name": "y", "type": "space", "unit": "micrometer"},
-                    {"name": "x", "type": "space", "unit": "micrometer"},
-                ],
-                "datasets": [
-                    {
-                        "path": "0",
-                        "coordinateTransformations": [{"type": "scale", "scale": [1.0, 1.0, 1.0]}],
-                    }
-                ],
-            }
-        ]
-        rich_view.text = json.dumps(proposed, indent=2)
-        await pilot.pause()
-        await pilot.press("f5")
-        await pilot.pause()
-
-        assert isinstance(app.screen, FixMetadataResultScreen)
-        result_screen = app.screen
-        await _wait_for(pilot, lambda: result_screen._finished)
-
-    assert "succeeded" in str(result_screen._outcome_label.content)
-
-
-async def test_migrate_screen_preview_updates_with_target_version_and_no_writes_before_run(
-    legacy_v2_ome_zarr,
-):
-    checksum_before = sorted((legacy_v2_ome_zarr / "0").rglob("*"))
-
-    app = _MigrateApp()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        screen = app.screen
-        path_input = screen.query_one("#field-zarr_path", Input)
-        path_input.focus()
-        await pilot.press(*str(legacy_v2_ome_zarr))
-        await pilot.pause()
-
-        rich_view = screen.query_one("#rich-view", TextArea)
-        first_preview = rich_view.text
-        assert '"version": "0.4"' in first_preview
-
-        target_input = screen.query_one("#field-target_version", Input)
-        target_input.focus()
-        for _ in range(3):
-            await pilot.press("backspace")
-        await pilot.press(*"0.5")
-        await pilot.pause()
-
-        second_preview = rich_view.text
-        assert '"version": "0.5"' in second_preview
-        assert second_preview != first_preview
-
-        # Zero writes have happened yet -- the dataset is exactly as it was.
-        assert sorted((legacy_v2_ome_zarr / "0").rglob("*")) == checksum_before
-        assert (legacy_v2_ome_zarr / ".zattrs").exists()
+        panels = list(app.screen.query(Static))
+        assert "none" in str(panels[0].content).lower()
+        assert '"a": 1' in str(panels[1].content)

@@ -28,6 +28,7 @@ from textual.widgets.option_list import Option
 
 from ome_zarr_tools.tui.execution import ExecutionResult, run_command
 from ome_zarr_tools.tui.fields import (
+    FIELD_GAP_CSS,
     FieldSpec,
     build_field_frames,
     build_field_spec,
@@ -117,12 +118,15 @@ class CommandFormScreen(Screen[None]):
 
     BINDINGS = [*shared_bindings(), Binding("f4", "restore_defaults", "Restore Defaults")]
 
-    DEFAULT_CSS = """
+    DEFAULT_CSS = (
+        """
     #bottom-bar {
         dock: bottom;
         height: auto;
     }
     """
+        + FIELD_GAP_CSS
+    )
 
     def __init__(self, command: click.Command) -> None:
         super().__init__()
@@ -245,6 +249,13 @@ class InteractiveTUIApp(App[None]):
     """Full-screen interface for `interactive --tui`. Commands run in-app; see tui/execution.py."""
 
     TITLE = "OME-Zarr Tools"
+
+    DEFAULT_CSS = FIELD_GAP_CSS
+    """App-wide fallback so ``.field-gap`` (spec 004 US2) resolves for every
+    screen using ``build_field_frames()``, even those without their own local
+    copy of this rule -- ``CommandFormScreen``/``FixMetadataConfirmScreen``
+    additionally declare it themselves so it also resolves in isolation
+    (e.g. under a test harness that doesn't wrap screens in this App)."""
 
     def __init__(self, commands: dict[str, click.Command]) -> None:
         super().__init__()
