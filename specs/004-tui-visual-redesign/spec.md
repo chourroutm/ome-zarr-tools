@@ -993,3 +993,15 @@ shows the Result screen.
   instruction to ask before extending this to other commands, no other
   command's prep screen was changed — every other command keeps User
   Story 7's immediate-Run behavior unchanged.
+- **`ZARR_PATH` Browse-picker directory-selection bug, found and fixed
+  alongside this feature**: `extract`/`fix_metadata`/`migrate`/`inspect`'s
+  `zarr_path` argument was declared as `ZarrPathParamType(exists=True)`
+  with no `file_okay=False`, unlike `apply_mask`'s already-correct
+  `volume`/`mask` fields — so their Browse picker's `only` constraint
+  resolved to `"any"` instead of `"dir"`, and `BrowsePickerScreen` only
+  dismisses on `DirectorySelected` when `only == "dir"` (FR-011). A Zarr
+  store is always a directory, never a plain file, so selecting a folder
+  in these four commands' pickers only expanded/collapsed it in the tree
+  instead of choosing it — fixed by adding `file_okay=False` to all four,
+  matching `apply_mask`'s existing pattern. Pre-existing bug, unrelated
+  to User Story 8's new screens, surfaced by the user while testing them.

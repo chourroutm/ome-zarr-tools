@@ -5,7 +5,12 @@ from ome_zarr_tools.commands.extract import extract
 from ome_zarr_tools.commands.from_images import from_images
 from ome_zarr_tools.commands.inspect import inspect
 from ome_zarr_tools.tui.app import CommandFormScreen, InteractiveTUIApp
-from ome_zarr_tools.tui.fields import build_autocomplete, build_field_widget
+from ome_zarr_tools.tui.fields import (
+    PathField,
+    build_autocomplete,
+    build_field_spec,
+    build_field_widget,
+)
 
 
 def test_command_form_has_no_button_and_has_footer_shortcuts():
@@ -45,6 +50,24 @@ def test_multiple_option_with_no_explicit_default_shows_blank_not_sentinel():
     corner_param = next(p for p in extract.params if p.name == "corner")
     widget = build_field_widget(corner_param)
     assert widget.value == ""
+
+
+def test_zarr_path_browse_picker_selects_directories_not_just_files():
+    """A ZARR_PATH is always a directory (a Zarr store), never a plain file --
+    every command taking one must constrain its Browse picker to directories
+    (``only="dir"``) so selecting a folder in the picker actually dismisses it
+    with that path, the way apply_mask's volume/mask fields already do,
+    instead of only ever expanding/collapsing it in the tree."""
+    cli_commands = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
+    checked = 0
+    for command in cli_commands.values():
+        for param in command.params:
+            if param.name == "zarr_path":
+                spec = build_field_spec(param)
+                assert isinstance(spec.widget, PathField)
+                assert spec.widget.only == "dir", f"{command.name}'s zarr_path"
+                checked += 1
+    assert checked >= 4  # fix_metadata, migrate, extract, inspect all have one
 
 
 def test_help_lists_tui_flag():

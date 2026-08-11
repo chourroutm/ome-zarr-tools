@@ -127,7 +127,7 @@ def write_metadata(path: Path, group: zarr.Group, proposed_multiscales: list[dic
 
 
 @click.command(name="fix_metadata")
-@click.argument("zarr_path", type=ZarrPathParamType(exists=True))
+@click.argument("zarr_path", type=ZarrPathParamType(exists=True, file_okay=False))
 def fix_metadata(zarr_path: str) -> None:
     """Interactively populate/correct an OME-Zarr dataset's root metadata.
 

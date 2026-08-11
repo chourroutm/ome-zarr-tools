@@ -88,7 +88,7 @@ def _format_bytes(value: int | None) -> str:
 
 
 @click.command(name="inspect")
-@click.argument("zarr_path", type=ZarrPathParamType(exists=True))
+@click.argument("zarr_path", type=ZarrPathParamType(exists=True, file_okay=False))
 @click.option(
     "--format",
     "output_format",

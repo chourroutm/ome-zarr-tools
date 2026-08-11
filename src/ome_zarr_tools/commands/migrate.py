@@ -80,7 +80,7 @@ def apply_migration(path: Path, group: zarr.Group, target_version: str) -> Path:
 
 
 @click.command(name="migrate")
-@click.argument("zarr_path", type=ZarrPathParamType(exists=True))
+@click.argument("zarr_path", type=ZarrPathParamType(exists=True, file_okay=False))
 @click.option(
     "--target_version",
     default=DEFAULT_TARGET_VERSION,

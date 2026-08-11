@@ -15,7 +15,7 @@ from ome_zarr_tools.io.ome_metadata import read_multiscales
 
 
 @click.command()
-@click.argument("zarr_path", type=ZarrPathParamType(exists=True))
+@click.argument("zarr_path", type=ZarrPathParamType(exists=True, file_okay=False))
 @click.option(
     "--corner",
     nargs=3,
