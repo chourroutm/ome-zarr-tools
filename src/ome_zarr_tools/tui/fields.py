@@ -11,6 +11,7 @@ button + remote-scheme add-on, US4/US5), ``build_identity_frame()`` (US6).
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -418,6 +419,29 @@ def refresh_required_subtitle(required_frame: Vertical, specs: list[FieldSpec]) 
     required_frame.border_subtitle = f"{count_empty_required(specs)} remaining"
 
 
+def command_description(command: click.Command) -> str:
+    """A command's full, untruncated one-line description (FR-002c): the first
+    paragraph of its help text, blank if it has none.
+
+    Deliberately does not use ``click.Command.get_short_help_str()`` --
+    click's own truncation heuristic (``make_default_short_help``) treats
+    *any* word ending in "." as a sentence boundary and stops there, even at
+    an enormous ``limit`` -- so an abbreviation like "vs." (as in
+    ``inspect``'s help text) gets silently cut off mid-description with no
+    ellipsis, regardless of the limit passed in. Reimplements just the
+    "first paragraph, collapsed whitespace" part of that logic, skipping the
+    buggy early-stop-on-period truncation entirely."""
+    if command.short_help:
+        return inspect.cleandoc(command.short_help).strip()
+    if not command.help:
+        return ""
+    text = inspect.cleandoc(command.help)
+    paragraph_end = text.find("\n\n")
+    if paragraph_end != -1:
+        text = text[:paragraph_end]
+    return " ".join(text.split()).strip()
+
+
 def build_identity_frame(command: click.Command) -> Vertical:
     """Build the Command Identity block (spec 004 US6, shared by the command prep and
     command result screens): the command name in bold, its existing CLI description
@@ -428,7 +452,7 @@ def build_identity_frame(command: click.Command) -> Vertical:
     name_label = Label(command.name or "", id="identity-name")
     name_label.styles.text_style = "bold"
 
-    description_label = Label(command.get_short_help_str(limit=10_000), id="identity-description")
+    description_label = Label(command_description(command), id="identity-description")
     description_label.styles.width = "100%"
     description_label.styles.max_height = 3
 

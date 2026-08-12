@@ -33,6 +33,7 @@ from ome_zarr_tools.tui.fields import (
     build_field_frames,
     build_field_spec,
     build_identity_frame,
+    command_description,
     field_label,
     is_required,
     refresh_required_subtitle,
@@ -62,7 +63,7 @@ def _menu_option_prompt(name: str, command: click.Command) -> Group:
     return Group(
         Text(f"▎ {name}", style="bold"),
         Text(
-            f"  {command.get_short_help_str(limit=10_000)}",
+            f"  {command_description(command)}",
             style="dim",
             no_wrap=True,
             overflow="crop",

@@ -14,7 +14,7 @@ from textual.widgets import Input, Label
 
 from ome_zarr_tools.cli import cli
 from ome_zarr_tools.tui.app import CommandFormScreen
-from ome_zarr_tools.tui.fields import field_label
+from ome_zarr_tools.tui.fields import command_description, field_label
 
 COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
 
@@ -189,7 +189,7 @@ async def test_every_prep_screen_shows_identity_frame_with_name_and_description(
             description_label = frame.query_one("#identity-description", Label)
             assert str(name_label.content) == command.name
             assert name_label.styles.text_style.bold is True
-            expected_desc = command.get_short_help_str(limit=10_000)
+            expected_desc = command_description(command)
             assert expected_desc  # sanity: these real commands do have help text
             assert str(description_label.content) == expected_desc
             assert description_label.styles.max_height is not None
@@ -204,7 +204,7 @@ async def test_identity_frame_description_never_ellipsis_ed_even_when_long():
     the description text itself -- unlike /speckit-tasks' original T034/T036,
     which reused a hard `limit=70` character cutoff."""
     command = COMMANDS["apply_mask"]
-    full_help = command.get_short_help_str(limit=10_000)
+    full_help = command_description(command)
     assert len(full_help) > 70  # sanity: this command's help text is long enough to matter
 
     app = _ScreenApp(lambda: CommandFormScreen(command))
@@ -214,6 +214,25 @@ async def test_identity_frame_description_never_ellipsis_ed_even_when_long():
         texts = [str(w.content) for w in frame.query("Label")]
         assert full_help in texts
         assert not any(text.endswith("...") for text in texts)
+
+
+async def test_identity_frame_description_not_cut_at_abbreviation_period():
+    """``inspect``'s help text contains the abbreviation "vs.", which
+    ``click.Command.get_short_help_str()`` misidentifies as a sentence
+    boundary and truncates at -- silently, with no ellipsis -- regardless of
+    the ``limit`` passed in. The identity frame must show the text past
+    that point too."""
+    command = COMMANDS["inspect"]
+    assert "vs." in (command.help or "")  # sanity: still the abbreviation this guards against
+    full_help = command_description(command)
+    assert "logical size" in full_help  # the part click's heuristic used to cut off
+
+    app = _ScreenApp(lambda: CommandFormScreen(command))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        description_label = app.screen.query_one("#identity-description", Label)
+        assert str(description_label.content) == full_help
+        assert description_label.region.height >= 2  # must have wrapped, not clipped to 1 line
 
 
 async def test_identity_frame_blank_description_for_command_with_no_help():
