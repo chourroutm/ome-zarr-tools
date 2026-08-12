@@ -141,6 +141,55 @@ async def test_run_navigates_immediately_then_shows_failure(monkeypatch, tmp_pat
         await _wait_for(pilot, lambda: result_screen._finished)
         assert result_screen._outcome_label.display is True
         assert "failed" in str(result_screen._outcome_label.content)
+        # the outcome label itself stays short -- the full error prints below it
+        assert result_screen._error_label.display is True
+        assert str(result_screen._error_label.content)
+
+
+async def test_outcome_label_sits_at_the_right_end_of_the_identity_row():
+    """The status indicator (spec 004 follow-up) shares a row with the
+    command name/description instead of a separate line below it, pinned to
+    the right end -- the identity frame takes the remaining space (1fr) so
+    the outcome label is pushed flush right."""
+    app = _ScreenApp(lambda: InspectResultScreen(COMMANDS["inspect"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        from ome_zarr_tools.tui.execution import ExecutionResult
+
+        await screen.finish(ExecutionResult(succeeded=True))
+        await pilot.pause()
+
+        frame = screen.query_one("#identity-frame")
+        outcome = screen.query_one("#outcome-label")
+        assert frame.region.y == outcome.region.y  # same row as the command name
+        assert outcome.region.right == frame.region.right + outcome.region.width
+        assert outcome.region.x == frame.region.right  # flush against the frame's right edge
+
+
+async def test_error_detail_wraps_within_screen_width_not_clipped():
+    """A long failure message shown below the status row must wrap to the
+    screen's width like every other description text in this app, not
+    overflow past it on a single un-wrapped line (the same class of bug
+    fixed for identity-frame descriptions)."""
+    app = _ScreenApp(lambda: InspectResultScreen(COMMANDS["inspect"]))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        from ome_zarr_tools.tui.execution import ExecutionResult
+
+        long_error = (
+            "Some fairly long error message describing exactly what went wrong "
+            "here, long enough on its own to require wrapping across more than "
+            "one line at an 80-column terminal width."
+        )
+        await screen.finish(ExecutionResult(succeeded=False, error=long_error))
+        await pilot.pause()
+
+        error_label = screen.query_one("#error-detail")
+        assert long_error in str(error_label.content)
+        assert error_label.region.width <= 80
+        assert error_label.region.height >= 2  # must have wrapped, not overflowed on 1 line
 
 
 async def test_blocked_run_does_not_navigate():

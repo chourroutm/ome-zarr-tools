@@ -13,7 +13,7 @@ from collections.abc import Callable
 import click
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Label
 
@@ -40,6 +40,20 @@ class CommandResultScreen(Screen[None]):
     #result-content {
         height: auto;
     }
+    #identity-status-row {
+        height: auto;
+    }
+    #identity-status-row #identity-frame {
+        width: 1fr;
+    }
+    #outcome-label {
+        width: auto;
+        padding: 1 2 0 0;
+    }
+    #error-detail {
+        width: 100%;
+        padding: 0 2;
+    }
     """
 
     def __init__(self, command: click.Command) -> None:
@@ -48,13 +62,16 @@ class CommandResultScreen(Screen[None]):
         self._finished = False
         self._status_panel = StatusPanel()
         self._outcome_label = Label("", id="outcome-label")
+        self._error_label = Label("", id="error-detail")
         self._content_container = Vertical(id="result-content")
 
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll():
-            yield build_identity_frame(self.command)
-            yield self._outcome_label
+            with Horizontal(id="identity-status-row"):
+                yield build_identity_frame(self.command)
+                yield self._outcome_label
+            yield self._error_label
             yield self._content_container
         with Vertical(id="bottom-bar"):
             yield self._status_panel
@@ -62,6 +79,7 @@ class CommandResultScreen(Screen[None]):
 
     def on_mount(self) -> None:
         self._outcome_label.display = False
+        self._error_label.display = False
 
     def compose_result_content(self) -> ComposeResult:
         """Override in subclasses for finished-state, command-specific widgets."""
@@ -80,8 +98,11 @@ class CommandResultScreen(Screen[None]):
         self._outcome_label.display = True
         if result.succeeded:
             self._outcome_label.update(f"[green]✓ {self.command.name} succeeded.[/]")
+            self._error_label.display = False
         else:
-            self._outcome_label.update(f"[red]✗ {self.command.name} failed: {result.error}[/]")
+            self._outcome_label.update(f"[red]✗ {self.command.name} failed.[/]")
+            self._error_label.update(f"[red]{result.error}[/]")
+            self._error_label.display = True
         await self._content_container.remove_children()
         await self._content_container.mount_all(list(self.compose_result_content()))
 
