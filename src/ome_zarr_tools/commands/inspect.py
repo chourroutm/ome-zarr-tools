@@ -75,15 +75,15 @@ def format_text(report: dict) -> str:
         lines.append(f"  chunk shape:  {tuple(level['chunk_shape'])}")
         shard_shape = tuple(level["shard_shape"]) if level["shard_shape"] else "none"
         lines.append(f"  shard shape:  {shard_shape}")
-        lines.append(f"  stored size:  {_format_bytes(level['stored_bytes'])}")
+        lines.append(f"  stored size:  {format_bytes(level['stored_bytes'])}")
         lines.append(f"  logical size: {level['logical_bytes']} bytes")
         lines.append("")
-    lines.append(f"Total stored size:  {_format_bytes(report['total_stored_bytes'])}")
+    lines.append(f"Total stored size:  {format_bytes(report['total_stored_bytes'])}")
     lines.append(f"Total logical size: {report['total_logical_bytes']} bytes")
     return "\n".join(lines)
 
 
-def _format_bytes(value: int | None) -> str:
+def format_bytes(value: int | None) -> str:
     return f"{value} bytes" if value is not None else "unknown (store denied listing)"
 
 

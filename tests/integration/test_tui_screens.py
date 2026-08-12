@@ -7,8 +7,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from rich.console import Console
 from textual.app import App
-from textual.widgets import Input, TextArea
+from textual.widgets import Input, Static, TextArea
 
 from ome_zarr_tools.cli import cli
 from ome_zarr_tools.commands.config import read_config, target_config_path
@@ -17,6 +18,14 @@ from ome_zarr_tools.tui.screens.config_screen import ConfigResultScreen, ConfigS
 from ome_zarr_tools.tui.screens.inspect_screen import InspectResultScreen, InspectScreen
 
 COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
+
+
+def _render_to_text(renderable: object) -> str:
+    """Plain-text rendering of a Rich renderable, for substring assertions
+    against the Overview tab's Rich `Table`/`Text` content."""
+    console = Console(record=True, width=200)
+    console.print(renderable)
+    return console.export_text()
 
 
 class _InspectApp(App):
@@ -37,10 +46,10 @@ async def _wait_for(pilot, predicate, attempts: int = 50) -> None:  # noqa: ANN0
 
 
 async def test_inspect_screen_panels_match_build_report_after_run(sample_ome_zarr):
-    """T023: pressing Run builds the JSON-per-level and summary panels (from
-    build_report) on the Result screen -- nothing is built just from typing the
-    path (inspect is no longer live; a remote gs://\\s3:// path would otherwise
-    fire one network call per keystroke)."""
+    """T023: pressing Run builds a "Level N" tab per pyramid level (Rich-formatted
+    JSON, from build_report) plus an "Overview" tab on the Result screen -- nothing
+    is built just from typing the path (inspect is no longer live; a remote
+    gs://\\s3:// path would otherwise fire one network call per keystroke)."""
     expected = build_report(str(sample_ome_zarr))
 
     app = _InspectApp()
@@ -62,15 +71,54 @@ async def test_inspect_screen_panels_match_build_report_after_run(sample_ome_zar
         await _wait_for(pilot, lambda: result_screen._finished)
 
         for level in expected["levels"]:
-            panel = result_screen.query_one(f"#json-level-{level['path']}", TextArea)
-            assert json.loads(panel.text) == level
+            panel = result_screen.query_one(f"#json-level-{level['path']}", Static)
+            assert json.loads(panel.content.text.plain) == level
 
-        summary = result_screen.query_one("#summary-view", TextArea)
-        assert str(expected["total_stored_bytes"]) in summary.text
-        assert str(expected["total_logical_bytes"]) in summary.text
+        overview = result_screen.query_one("#overview-view", Static)
+        overview_text = _render_to_text(overview.content)
+        assert str(expected["total_stored_bytes"]) in overview_text
+        assert str(expected["total_logical_bytes"]) in overview_text
         for level in expected["levels"]:
-            assert str(tuple(level["shape"])) in summary.text
-            assert str(tuple(level["chunk_shape"])) in summary.text
+            assert str(tuple(level["shape"])) in overview_text
+            assert str(tuple(level["chunk_shape"])) in overview_text
+
+
+async def test_inspect_result_screen_uses_tabs_with_rich_formatting(sample_ome_zarr):
+    """The report is presented as tabs ("Overview", "Level 0", ...) instead of
+    x+1 stacked panels, and each tab's content is a genuine Rich renderable
+    (a colorized `rich.json.JSON`/`Table`), not plain unstyled text."""
+    from rich.console import Group
+    from rich.json import JSON
+    from textual.widgets import TabbedContent, TabPane
+
+    expected = build_report(str(sample_ome_zarr))
+
+    app = _InspectApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        path_input = screen.query_one("#field-zarr_path", Input)
+        path_input.focus()
+        await pilot.press(*str(sample_ome_zarr))
+        await pilot.pause()
+        await pilot.press("f5")
+        await pilot.pause()
+        result_screen = app.screen
+        await _wait_for(pilot, lambda: result_screen._finished)
+
+        tabs = result_screen.query_one(TabbedContent)
+        panes = {pane.id: str(pane._title) for pane in tabs.query(TabPane)}
+        expected_ids = {"tab-overview", *(f"tab-level-{lvl['path']}" for lvl in expected["levels"])}
+        assert set(panes) == expected_ids
+        assert panes["tab-overview"] == "Overview"
+        for level in expected["levels"]:
+            assert panes[f"tab-level-{level['path']}"] == f"Level {level['path']}"
+
+        overview = result_screen.query_one("#overview-view", Static)
+        assert isinstance(overview.content, Group)  # Rich renderable, not a plain string
+        for level in expected["levels"]:
+            panel = result_screen.query_one(f"#json-level-{level['path']}", Static)
+            assert isinstance(panel.content, JSON)  # syntax-highlighted, not plain text
 
 
 async def test_inspect_screen_run_twice_in_a_row_does_not_crash(sample_ome_zarr):
@@ -102,8 +150,8 @@ async def test_inspect_screen_run_twice_in_a_row_does_not_crash(sample_ome_zarr)
         await _wait_for(pilot, lambda: second_result._finished)
         assert "succeeded" in str(second_result._outcome_label.content)
 
-        panel = second_result.query_one("#json-level-0", TextArea)
-        assert json.loads(panel.text)["path"] == "0"
+        panel = second_result.query_one("#json-level-0", Static)
+        assert json.loads(panel.content.text.plain)["path"] == "0"
 
 
 async def test_inspect_screen_run_executes_the_real_cli_command(sample_ome_zarr):

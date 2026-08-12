@@ -12,13 +12,17 @@ import json
 from pathlib import Path
 
 import click
+from rich.console import Group
+from rich.json import JSON
+from rich.table import Table
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Input, TextArea
+from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane
 
-from ome_zarr_tools.commands.inspect import build_report, format_text
+from ome_zarr_tools.commands.inspect import build_report, format_bytes, format_text
 from ome_zarr_tools.core.zarr_path import is_remote_path
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
 from ome_zarr_tools.tui.fields import (
@@ -34,6 +38,48 @@ from ome_zarr_tools.tui.shortcuts import shared_bindings
 from ome_zarr_tools.tui.status import StatusPanel
 
 
+def _build_overview(report: dict) -> Group:
+    """Rich-formatted "Overview" tab content: dataset path, metadata
+    validity, and a table with one row per pyramid level."""
+    header = Text()
+    header.append("Dataset: ", style="bold")
+    header.append(report["dataset"])
+    header.append("\n")
+    header.append("Metadata valid: ", style="bold")
+    header.append(
+        str(report["metadata_valid"]), style="green" if report["metadata_valid"] else "red"
+    )
+
+    table = Table(show_header=True, header_style="bold", expand=True)
+    table.add_column("Level")
+    table.add_column("Shape")
+    table.add_column("Dtype")
+    table.add_column("Chunk shape")
+    table.add_column("Shard shape")
+    table.add_column("Stored size", justify="right")
+    table.add_column("Logical size", justify="right")
+    for level in report["levels"]:
+        shard_shape = tuple(level["shard_shape"]) if level["shard_shape"] else "none"
+        table.add_row(
+            level["path"],
+            str(tuple(level["shape"])),
+            level["dtype"],
+            str(tuple(level["chunk_shape"])),
+            str(shard_shape),
+            format_bytes(level["stored_bytes"]),
+            f"{level['logical_bytes']} bytes",
+        )
+
+    totals = Text()
+    totals.append("Total stored size: ", style="bold")
+    totals.append(format_bytes(report["total_stored_bytes"]))
+    totals.append("\n")
+    totals.append("Total logical size: ", style="bold")
+    totals.append(f"{report['total_logical_bytes']} bytes")
+
+    return Group(header, "", table, "", totals)
+
+
 class InspectResultScreen(CommandResultScreen):
     def __init__(self, command: click.Command, report: dict | None = None) -> None:
         super().__init__(command)
@@ -42,14 +88,27 @@ class InspectResultScreen(CommandResultScreen):
     def compose_result_content(self) -> ComposeResult:
         if self.report is None:
             return
-        yield TextArea(format_text(self.report), read_only=True, id="summary-view")
-        for level in self.report["levels"]:
-            yield TextArea(
-                json.dumps(level, indent=2),
-                language="json",
-                read_only=True,
-                id=f"json-level-{level['path']}",
+        overview_pane = TabPane(
+            "Overview", Static(_build_overview(self.report), id="overview-view"), id="tab-overview"
+        )
+        level_panes = [
+            TabPane(
+                f"Level {level['path']}",
+                Static(JSON(json.dumps(level, indent=2)), id=f"json-level-{level['path']}"),
+                id=f"tab-level-{level['path']}",
             )
+            for level in self.report["levels"]
+        ]
+        # TabbedContent only collects children via the `with TabbedContent(): yield ...`
+        # compose-time idiom (`compose_add_child()`), which relies on Textual's
+        # `app._compose_stacks` -- not set up here, since `compose_result_content()` is
+        # invoked directly via `list(...)` (CommandResultScreen.finish()), not through
+        # the normal `compose()` lifecycle. Attach the already-built panes the same way
+        # that idiom does under the hood: appending straight to `_tab_content`.
+        tabs = TabbedContent(id="inspect-tabs")
+        for pane in (overview_pane, *level_panes):
+            tabs.compose_add_child(pane)
+        yield tabs
 
 
 class InspectScreen(Screen[None]):

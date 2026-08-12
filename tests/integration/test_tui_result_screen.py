@@ -295,7 +295,8 @@ async def test_inspect_result_screen_shows_summary_and_json_report(
         result_screen = app.screen
         await _wait_for(pilot, lambda: result_screen._finished)
         assert result_screen.report is not None
-        assert len(result_screen.query("TextArea")) >= 1
+        assert result_screen.query_one("#tab-overview")
+        assert result_screen.query_one("#tab-level-0")
 
 
 async def test_fix_metadata_result_screen_shows_applied_diff(sample_ome_zarr):
