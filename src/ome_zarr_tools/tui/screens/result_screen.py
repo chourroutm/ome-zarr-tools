@@ -39,6 +39,7 @@ class CommandResultScreen(Screen[None]):
     }
     #result-content {
         height: auto;
+        padding: 1 2;
     }
     #identity-status-row {
         height: auto;
