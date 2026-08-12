@@ -96,8 +96,9 @@ class BrowsePickerScreen(ModalScreen[Path | None]):
         self.dismiss(event.path)
 
     def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
-        if self.only == "dir":
-            self.dismiss(event.path)
+        if self.only == "file":
+            return
+        self.dismiss(event.path)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "root-path-input":

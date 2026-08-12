@@ -92,6 +92,120 @@ async def test_browse_picker_select_fills_field_leaves_others_unchanged(monkeypa
         assert other_field.value == original_other_value
 
 
+async def test_browse_picker_directory_click_selects_for_any_mode_output_field(
+    monkeypatch, tmp_path
+):
+    """FR-001/FR-002: for a field accepting either a file or a directory (`only="any"`,
+    e.g. from_images' OUTPUT_ZARR), clicking a directory's name must dismiss the popup
+    and fill the field -- previously this only worked for only="dir" fields, and a
+    directory click here was a silent no-op (only expand/collapse)."""
+    monkeypatch.chdir(tmp_path)
+    subdir = tmp_path / "mydata.zarr"
+    subdir.mkdir()
+
+    app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        output_field = next(
+            s.widget
+            for s in screen._field_specs
+            if isinstance(s.widget, PathField) and s.widget.input.id == "field-output_zarr"
+        )
+        # sanity: OUTPUT_ZARR accepts either a file or a directory
+        assert output_field.only == "any"
+        button = output_field.query_one(Button)
+        button.scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.click(button)
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(app.screen, BrowsePickerScreen)
+
+        tree = app.screen.query_one(SafeDirectoryTree)
+        node = next(n for n in tree.root.children if n.data and n.data.path == subdir)
+        tree.select_node(node)
+        app.screen.post_message(DirectoryTree.DirectorySelected(node, subdir))
+        await pilot.pause()
+
+        assert app.screen is screen
+        assert output_field.input.value == str(subdir)
+
+
+async def test_browse_picker_directory_click_selects_for_extract_output_field(
+    monkeypatch, tmp_path
+):
+    """Same-shape regression for extract's --output (also only="any") -- confirms the
+    fix lives in the shared BrowsePickerScreen component, not a from_images special
+    case, per the spec's clarification."""
+    monkeypatch.chdir(tmp_path)
+    subdir = tmp_path / "result_dir"
+    subdir.mkdir()
+
+    app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["extract"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        output_field = next(
+            s.widget
+            for s in screen._field_specs
+            if isinstance(s.widget, PathField) and s.widget.input.id == "field-output"
+        )
+        assert output_field.only == "any"
+        button = output_field.query_one(Button)
+        button.scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.click(button)
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(app.screen, BrowsePickerScreen)
+
+        tree = app.screen.query_one(SafeDirectoryTree)
+        node = next(n for n in tree.root.children if n.data and n.data.path == subdir)
+        tree.select_node(node)
+        app.screen.post_message(DirectoryTree.DirectorySelected(node, subdir))
+        await pilot.pause()
+
+        assert app.screen is screen
+        assert output_field.input.value == str(subdir)
+
+
+async def test_browse_picker_directory_click_stays_noop_for_file_only_field(monkeypatch, tmp_path):
+    """FR-005: a field restricted to files only (only="file", e.g. from_images'
+    --vol_file) must keep ignoring directory selection -- the refactored guard must
+    not accidentally widen this case too."""
+    monkeypatch.chdir(tmp_path)
+    subdir = tmp_path / "some_dir"
+    subdir.mkdir()
+
+    app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        vol_field = next(
+            s.widget
+            for s in screen._field_specs
+            if isinstance(s.widget, PathField) and s.widget.input.id == "field-vol_file"
+        )
+        assert vol_field.only == "file"
+        button = vol_field.query_one(Button)
+        button.scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.click(button)
+        await pilot.pause()
+        await pilot.pause()
+        assert isinstance(app.screen, BrowsePickerScreen)
+
+        tree = app.screen.query_one(SafeDirectoryTree)
+        node = next(n for n in tree.root.children if n.data and n.data.path == subdir)
+        tree.select_node(node)
+        app.screen.post_message(DirectoryTree.DirectorySelected(node, subdir))
+        await pilot.pause()
+
+        assert isinstance(app.screen, BrowsePickerScreen)  # still open -- no-op, as before
+        assert vol_field.input.value == ""
+
+
 async def test_browse_picker_cancel_leaves_field_unchanged(tmp_path):
     app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
     async with app.run_test() as pilot:
