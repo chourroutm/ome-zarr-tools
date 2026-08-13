@@ -291,14 +291,18 @@ async def test_migrate_form_chunks_per_shard_field_is_optional_and_blank(legacy_
 
 
 async def test_migrate_form_blocks_run_when_sharding_requested_below_0_5(legacy_v2_ome_zarr):
-    """FR: --chunks_per_shard requires --target_version 0.5+; the default target
-    (0.4) plus a sharding value must block Run with a clear error, not navigate."""
+    """FR: --chunks_per_shard requires --target_version 0.5+; a pre-0.5 target
+    plus a sharding value must block Run with a clear error, not navigate."""
     app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
         screen._path_field.input.focus()
         await pilot.press(*str(legacy_v2_ome_zarr))
+        screen._target_input.focus()
+        for _ in range(len(screen._target_input.value)):
+            await pilot.press("backspace")
+        await pilot.press(*"0.4")
         screen._shard_input.focus()
         await pilot.press(*"2")
         await pilot.pause()
@@ -306,7 +310,7 @@ async def test_migrate_form_blocks_run_when_sharding_requested_below_0_5(legacy_
         await pilot.press("f5")
         await pilot.pause()
 
-        assert app.screen is screen  # blocked -- default target_version is 0.4
+        assert app.screen is screen  # blocked -- target_version is pre-0.5
 
 
 async def test_migrate_form_blocks_run_when_chunks_per_shard_not_a_number(legacy_v2_ome_zarr):
@@ -463,13 +467,9 @@ async def test_migrate_confirm_applies_migration_to_output_leaves_original_untou
 async def test_migrate_confirm_nothing_to_do_shows_message_and_confirm_is_noop(
     legacy_v2_ome_zarr,
 ):
-    from ome_zarr_tools.commands.migrate import DEFAULT_TARGET_VERSION
-
-    app = _ScreenApp(
-        lambda: MigrateConfirmScreen(
-            COMMANDS["migrate"], legacy_v2_ome_zarr, DEFAULT_TARGET_VERSION
-        )
-    )
+    # legacy_v2_ome_zarr is created at 0.4 (conftest.py) -- pass that explicitly rather
+    # than DEFAULT_TARGET_VERSION (now 0.5), which the "nothing to do" case must not assume.
+    app = _ScreenApp(lambda: MigrateConfirmScreen(COMMANDS["migrate"], legacy_v2_ome_zarr, "0.4"))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen

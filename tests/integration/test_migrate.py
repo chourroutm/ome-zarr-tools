@@ -49,12 +49,15 @@ def test_migrate_with_chunks_per_shard_writes_sharded_zarr_v3(legacy_v2_ome_zarr
 
 
 def test_migrate_chunks_per_shard_rejected_for_pre_0_5_target(legacy_v2_ome_zarr):
-    """Sharding is a Zarr v3 (OME-NGFF 0.5+) concept -- Zarr v2 (the default target,
-    0.4) has none, so this combination must be rejected before any zarr I/O."""
+    """Sharding is a Zarr v3 (OME-NGFF 0.5+) concept -- Zarr v2 (0.4) has none, so
+    this combination must be rejected before any zarr I/O."""
     before = dict(zarr.open_group(str(legacy_v2_ome_zarr), mode="r").attrs)
 
     runner = CliRunner()
-    result = runner.invoke(migrate, [str(legacy_v2_ome_zarr), "--chunks_per_shard", "2"])
+    result = runner.invoke(
+        migrate,
+        [str(legacy_v2_ome_zarr), "--target_version", "0.4", "--chunks_per_shard", "2"],
+    )
     assert result.exit_code != 0
     assert "chunks_per_shard" in result.output
     assert "0.5" in result.output

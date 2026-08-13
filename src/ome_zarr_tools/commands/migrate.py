@@ -11,7 +11,11 @@ from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.core.zarr_path import ZarrPathParamType
 from ome_zarr_tools.io.ome_metadata import detect_version, validate
 
-DEFAULT_TARGET_VERSION = "0.4"
+DEFAULT_TARGET_VERSION = "0.5"
+LEGACY_ZARR_V2_VERSION = "0.4"
+"""The only pre-0.5 (Zarr v2) version this tool supports as a --target_version --
+distinct from DEFAULT_TARGET_VERSION (the CLI's own default when --target_version
+is omitted), which is 0.5+ and therefore must never be compared against here."""
 
 
 def validate_chunks_per_shard(target_version: str, chunks_per_shard: int | None) -> None:
@@ -24,7 +28,7 @@ def validate_chunks_per_shard(target_version: str, chunks_per_shard: int | None)
     command and the TUI's Form screen (``tui/screens/metadata_screen.py``), which
     bypasses the CLI command entirely.
     """
-    if chunks_per_shard is not None and target_version == DEFAULT_TARGET_VERSION:
+    if chunks_per_shard is not None and target_version == LEGACY_ZARR_V2_VERSION:
         raise CliError(
             "--chunks_per_shard requires --target_version 0.5 or later "
             f"-- sharding isn't supported by Zarr v2 (target version {target_version!r})."

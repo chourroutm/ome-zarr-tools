@@ -194,7 +194,7 @@ async def test_config_screen_current_and_defaults_match_scope(monkeypatch, tmp_p
         current = screen.query_one("#current-view", TextArea)
         assert json.loads(current.text) == {}
         defaults = screen.query_one("#defaults-view", TextArea)
-        assert json.loads(defaults.text)["target_version"] == "0.4"  # migrate's CLI default
+        assert json.loads(defaults.text)["target_version"] == "0.5"  # migrate's CLI default
 
         screen._scope_select.value = "project"
         await pilot.pause()
