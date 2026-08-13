@@ -64,6 +64,57 @@ def test_migrate_chunks_per_shard_rejected_for_pre_0_5_target(legacy_v2_ome_zarr
     assert not list(legacy_v2_ome_zarr.parent.glob("legacy.zarr_zattrs_backup_*.json"))
 
 
+def test_migrate_with_output_writes_new_location_leaves_original_untouched(
+    tmp_path, legacy_v2_ome_zarr
+):
+    before = dict(zarr.open_group(str(legacy_v2_ome_zarr), mode="r").attrs)
+    output = tmp_path / "migrated.zarr"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        migrate,
+        [str(legacy_v2_ome_zarr), "--target_version", "0.5", "--output", str(output)],
+        input="y\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert str(output) in result.output
+
+    after = dict(zarr.open_group(str(legacy_v2_ome_zarr), mode="r").attrs)
+    assert before == after  # original completely untouched
+    assert not list(legacy_v2_ome_zarr.parent.glob("legacy.zarr_zattrs_backup_*.json"))
+
+    output_group = zarr.open_group(str(output), mode="r")
+    assert output_group.attrs["ome"]["version"] == "0.5"
+
+
+def test_migrate_with_output_rejects_existing_path(tmp_path, legacy_v2_ome_zarr):
+    output = tmp_path / "already_here.zarr"
+    output.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        migrate, [str(legacy_v2_ome_zarr), "--target_version", "0.5", "--output", str(output)]
+    )
+    assert result.exit_code != 0
+    assert "already exists" in result.output
+
+
+def test_migrate_with_output_and_same_version_still_writes_a_copy(tmp_path, legacy_v2_ome_zarr):
+    """Unlike in-place migration, --output to a same-version target is not a
+    no-op -- e.g. re-sharding without a version bump is a legitimate use."""
+    output = tmp_path / "copy.zarr"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        migrate,
+        [str(legacy_v2_ome_zarr), "--target_version", "0.4", "--output", str(output)],
+        input="y\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert "already at version" not in result.output
+    assert output.exists()
+
+
 def test_migrate_declined_confirmation_leaves_dataset_untouched(legacy_v2_ome_zarr):
     before = dict(zarr.open_group(str(legacy_v2_ome_zarr), mode="r").attrs)
 

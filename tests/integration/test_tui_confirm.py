@@ -375,6 +375,91 @@ async def test_migrate_confirm_applies_migration_with_sharding(legacy_v2_ome_zar
     assert migrated_group[dataset_path].shards is not None
 
 
+async def test_migrate_form_output_field_is_optional_and_blank(legacy_v2_ome_zarr):
+    from textual.containers import Vertical
+
+    app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        optional_frame = screen.query_one("#optional-frame", Vertical)
+        assert screen._output_field.input in optional_frame.query(Input)
+        assert screen._output_field.value == ""
+
+
+async def test_migrate_form_blocks_run_when_output_already_exists(tmp_path, legacy_v2_ome_zarr):
+    existing_output = tmp_path / "already_here.zarr"
+    existing_output.mkdir()
+
+    app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen._path_field.input.focus()
+        await pilot.press(*str(legacy_v2_ome_zarr))
+        screen._output_field.input.focus()
+        await pilot.press(*str(existing_output))
+        await pilot.pause()
+
+        await pilot.press("f5")
+        await pilot.pause()
+
+        assert app.screen is screen  # blocked -- output path already exists
+
+
+async def test_migrate_form_run_passes_output_path_to_confirm_screen(tmp_path, legacy_v2_ome_zarr):
+    output = tmp_path / "migrated.zarr"
+
+    app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen._path_field.input.focus()
+        await pilot.press(*str(legacy_v2_ome_zarr))
+        screen._target_input.focus()
+        for _ in range(len(screen._target_input.value)):
+            await pilot.press("backspace")
+        await pilot.press(*"0.5")
+        screen._output_field.input.focus()
+        await pilot.press(*str(output))
+        await pilot.pause()
+
+        assert f"--output {output}" in screen._invocation_text()
+
+        await pilot.press("f5")
+        await pilot.pause()
+
+        assert isinstance(app.screen, MigrateConfirmScreen)
+        assert app.screen.output_path == output
+        assert f"--output {output}" in app.screen._invocation_text()
+
+
+async def test_migrate_confirm_applies_migration_to_output_leaves_original_untouched(
+    tmp_path, legacy_v2_ome_zarr
+):
+    before = dict(zarr.open_group(str(legacy_v2_ome_zarr), mode="r").attrs)
+    output = tmp_path / "migrated.zarr"
+
+    app = _ScreenApp(
+        lambda: MigrateConfirmScreen(COMMANDS["migrate"], legacy_v2_ome_zarr, "0.5", None, output)
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f5")
+        await pilot.pause()
+
+        assert isinstance(app.screen, MigrateResultScreen)
+        result_screen = app.screen
+        await _wait_for(pilot, lambda: result_screen._finished)
+        assert "succeeded" in str(result_screen._outcome_label.content)
+
+    after = dict(zarr.open_group(str(legacy_v2_ome_zarr), mode="r").attrs)
+    assert before == after  # original untouched
+
+    output_group = zarr.open_group(str(output), mode="r")
+    assert output_group.attrs["ome"]["version"] == "0.5"
+
+
 async def test_migrate_confirm_nothing_to_do_shows_message_and_confirm_is_noop(
     legacy_v2_ome_zarr,
 ):

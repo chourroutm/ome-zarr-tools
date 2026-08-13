@@ -34,6 +34,7 @@ from ome_zarr_tools.commands.migrate import (
     apply_migration,
     preview_migration,
     validate_chunks_per_shard,
+    validate_output_path,
 )
 from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.io.ome_metadata import detect_version, read_multiscales
@@ -168,6 +169,7 @@ class MigrateScreen(_BaseMetadataScreen):
         super().__init__(command)
         self._target_input: Input | None = None
         self._shard_input: Input | None = None
+        self._output_field: PathField | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -180,6 +182,7 @@ class MigrateScreen(_BaseMetadataScreen):
             chunks_per_shard_param = next(
                 p for p in self.command.params if p.name == "chunks_per_shard"
             )
+            output_param = next(p for p in self.command.params if p.name == "output")
             path_spec = build_field_spec(zarr_path_param)
             assert isinstance(path_spec.widget, PathField)
             self._path_field = path_spec.widget
@@ -194,7 +197,10 @@ class MigrateScreen(_BaseMetadataScreen):
             shard_spec = build_field_spec(chunks_per_shard_param)
             assert isinstance(shard_spec.widget, Input)
             self._shard_input = shard_spec.widget
-            self._field_specs = [path_spec, target_spec, shard_spec]
+            output_spec = build_field_spec(output_param)
+            assert isinstance(output_spec.widget, PathField)
+            self._output_field = output_spec.widget
+            self._field_specs = [path_spec, target_spec, shard_spec, output_spec]
             for frame in build_field_frames(self._field_specs):
                 if frame.id == "required-frame":
                     self._required_frame = frame
@@ -207,6 +213,7 @@ class MigrateScreen(_BaseMetadataScreen):
         assert self._path_field is not None
         assert self._target_input is not None
         assert self._shard_input is not None
+        assert self._output_field is not None
         tokens = [
             f"ome-zarr-tools migrate {self._path_field.value}",
             f"--target_version {self._target_input.value}",
@@ -214,6 +221,9 @@ class MigrateScreen(_BaseMetadataScreen):
         shard_value = self._shard_input.value.strip()
         if shard_value:
             tokens.append(f"--chunks_per_shard {shard_value}")
+        output_value = self._output_field.value.strip()
+        if output_value:
+            tokens.append(f"--output {output_value}")
         return " ".join(tokens).strip()
 
     def _parse_chunks_per_shard(self) -> tuple[int | None, str | None]:
@@ -235,6 +245,21 @@ class MigrateScreen(_BaseMetadataScreen):
             return None, str(exc)
         return chunks_per_shard, None
 
+    def _parse_output_path(self) -> tuple[Path | None, str | None]:
+        """Returns ``(value, error)`` -- ``value`` is ``None`` if the field is blank
+        (migrate in place) or validation failed, in which case ``error`` is a
+        message ready to show the user."""
+        assert self._output_field is not None
+        raw = self._output_field.value.strip()
+        if not raw:
+            return None, None
+        output_path = Path(raw)
+        try:
+            validate_output_path(output_path)
+        except CliError as exc:
+            return None, str(exc)
+        return output_path, None
+
     def action_run(self) -> None:
         assert self._path_field is not None
         assert self._target_input is not None
@@ -248,14 +273,22 @@ class MigrateScreen(_BaseMetadataScreen):
             self._target_input.focus()
             self.notify("Target Version is required", severity="error")
             return
-        chunks_per_shard, error = self._parse_chunks_per_shard()
-        if error is not None:
+        chunks_per_shard, shard_error = self._parse_chunks_per_shard()
+        if shard_error is not None:
             assert self._shard_input is not None
             self._shard_input.focus()
-            self.notify(error, severity="error")
+            self.notify(shard_error, severity="error")
+            return
+        output_path, output_error = self._parse_output_path()
+        if output_error is not None:
+            assert self._output_field is not None
+            self._output_field.input.focus()
+            self.notify(output_error, severity="error")
             return
         self.app.push_screen(
-            MigrateConfirmScreen(self.command, Path(path_str), target_version, chunks_per_shard)
+            MigrateConfirmScreen(
+                self.command, Path(path_str), target_version, chunks_per_shard, output_path
+            )
         )
 
     async def action_restore_defaults(self) -> None:
@@ -494,14 +527,19 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
         zarr_path: Path,
         target_version: str,
         chunks_per_shard: int | None = None,
+        output_path: Path | None = None,
     ) -> None:
         super().__init__(command, zarr_path)
         self.target_version = target_version
         self.chunks_per_shard = chunks_per_shard
+        self.output_path = output_path
         group = zarr.open_group(str(zarr_path), mode="r")
         self._before: dict = dict(group.attrs)
         self._source_version = detect_version(group)
-        self._nothing_to_do = self._source_version == target_version
+        # A same-version "copy" to a new --output location is still meaningful
+        # (e.g. re-sharding without a version bump) -- only in-place migration
+        # short-circuits when there's nothing to change about zarr_path itself.
+        self._nothing_to_do = output_path is None and self._source_version == target_version
         self._after: dict = {}
         self._error: str | None = None
         if not self._nothing_to_do:
@@ -535,6 +573,8 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
             status = f"Migrating from {self._source_version} to {self.target_version}"
             if self.chunks_per_shard is not None:
                 status += f" (sharding: {self.chunks_per_shard} chunks/shard)"
+            if self.output_path is not None:
+                status += f" -- writing to {self.output_path} (ZARR_PATH untouched)"
             self._status_label.update(f"{status}:")
             await self._diff_container.mount(build_side_by_side_diff(self._before, self._after))
 
@@ -542,6 +582,8 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
         tokens = f"ome-zarr-tools migrate {self.zarr_path} --target_version {self.target_version}"
         if self.chunks_per_shard is not None:
             tokens += f" --chunks_per_shard {self.chunks_per_shard}"
+        if self.output_path is not None:
+            tokens += f" --output {self.output_path}"
         return tokens
 
     def action_run(self) -> None:
@@ -559,7 +601,13 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
         group = zarr.open_group(str(self.zarr_path), mode="r")
 
         def _work() -> None:
-            apply_migration(self.zarr_path, group, self.target_version, self.chunks_per_shard)
+            apply_migration(
+                self.zarr_path,
+                group,
+                self.target_version,
+                self.chunks_per_shard,
+                self.output_path,
+            )
 
         result_screen = MigrateResultScreen(self.command, self._before, self._after)
         self._pending_result = result_screen
