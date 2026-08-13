@@ -30,11 +30,7 @@ from ome_zarr_tools.commands.fix_metadata import (
     parse_tuple_input,
     write_metadata,
 )
-from ome_zarr_tools.commands.migrate import (
-    DEFAULT_TARGET_VERSION,
-    apply_migration,
-    preview_migration,
-)
+from ome_zarr_tools.commands.migrate import apply_migration, preview_migration
 from ome_zarr_tools.io.ome_metadata import detect_version, read_multiscales
 from ome_zarr_tools.tui.diff import build_side_by_side_diff
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
@@ -165,29 +161,39 @@ class FixMetadataScreen(_BaseMetadataScreen):
 class MigrateScreen(_BaseMetadataScreen):
     def __init__(self, command: click.Command) -> None:
         super().__init__(command)
-        self._target_input = Input(value=DEFAULT_TARGET_VERSION, id="field-target_version")
+        self._target_input: Input | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll():
             yield build_identity_frame(self.command)
             zarr_path_param = next(p for p in self.command.params if p.name == "zarr_path")
-            spec = build_field_spec(zarr_path_param)
-            assert isinstance(spec.widget, PathField)
-            self._path_field = spec.widget
-            self._field_specs = [spec]
+            target_version_param = next(
+                p for p in self.command.params if p.name == "target_version"
+            )
+            path_spec = build_field_spec(zarr_path_param)
+            assert isinstance(path_spec.widget, PathField)
+            self._path_field = path_spec.widget
+            target_spec = build_field_spec(target_version_param)
+            assert isinstance(target_spec.widget, Input)
+            self._target_input = target_spec.widget
+            # --target_version has a CLI default (so click itself never requires it), but
+            # this screen always shows it alongside ZARR_PATH -- grouping it in the same
+            # Required frame keeps the two path/version fields the user reviews together
+            # visually consistent, rather than tucking a pre-filled field into Optional.
+            target_spec.required = True
+            self._field_specs = [path_spec, target_spec]
             for frame in build_field_frames(self._field_specs):
                 if frame.id == "required-frame":
                     self._required_frame = frame
                 yield frame
-            yield Label("--target_version")
-            yield self._target_input
         with Vertical(id="bottom-bar"):
             yield self._status_panel
             yield Footer()
 
     def _invocation_text(self) -> str:
         assert self._path_field is not None
+        assert self._target_input is not None
         return (
             f"ome-zarr-tools migrate {self._path_field.value} "
             f"--target_version {self._target_input.value}"
@@ -195,12 +201,17 @@ class MigrateScreen(_BaseMetadataScreen):
 
     def action_run(self) -> None:
         assert self._path_field is not None
+        assert self._target_input is not None
         path_str = self._path_field.value.strip()
         if not path_str or not Path(path_str).exists():
             self._path_field.input.focus()
             self.notify("ZARR_PATH is required", severity="error")
             return
-        target_version = self._target_input.value.strip() or DEFAULT_TARGET_VERSION
+        target_version = self._target_input.value.strip()
+        if not target_version:
+            self._target_input.focus()
+            self.notify("Target Version is required", severity="error")
+            return
         self.app.push_screen(MigrateConfirmScreen(self.command, Path(path_str), target_version))
 
     async def action_restore_defaults(self) -> None:
