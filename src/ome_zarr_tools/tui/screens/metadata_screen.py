@@ -30,7 +30,12 @@ from ome_zarr_tools.commands.fix_metadata import (
     parse_tuple_input,
     write_metadata,
 )
-from ome_zarr_tools.commands.migrate import apply_migration, preview_migration
+from ome_zarr_tools.commands.migrate import (
+    apply_migration,
+    preview_migration,
+    validate_chunks_per_shard,
+)
+from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.io.ome_metadata import detect_version, read_multiscales
 from ome_zarr_tools.tui.diff import build_side_by_side_diff
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background
@@ -162,6 +167,7 @@ class MigrateScreen(_BaseMetadataScreen):
     def __init__(self, command: click.Command) -> None:
         super().__init__(command)
         self._target_input: Input | None = None
+        self._shard_input: Input | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -170,6 +176,9 @@ class MigrateScreen(_BaseMetadataScreen):
             zarr_path_param = next(p for p in self.command.params if p.name == "zarr_path")
             target_version_param = next(
                 p for p in self.command.params if p.name == "target_version"
+            )
+            chunks_per_shard_param = next(
+                p for p in self.command.params if p.name == "chunks_per_shard"
             )
             path_spec = build_field_spec(zarr_path_param)
             assert isinstance(path_spec.widget, PathField)
@@ -182,7 +191,10 @@ class MigrateScreen(_BaseMetadataScreen):
             # Required frame keeps the two path/version fields the user reviews together
             # visually consistent, rather than tucking a pre-filled field into Optional.
             target_spec.required = True
-            self._field_specs = [path_spec, target_spec]
+            shard_spec = build_field_spec(chunks_per_shard_param)
+            assert isinstance(shard_spec.widget, Input)
+            self._shard_input = shard_spec.widget
+            self._field_specs = [path_spec, target_spec, shard_spec]
             for frame in build_field_frames(self._field_specs):
                 if frame.id == "required-frame":
                     self._required_frame = frame
@@ -194,10 +206,34 @@ class MigrateScreen(_BaseMetadataScreen):
     def _invocation_text(self) -> str:
         assert self._path_field is not None
         assert self._target_input is not None
-        return (
-            f"ome-zarr-tools migrate {self._path_field.value} "
-            f"--target_version {self._target_input.value}"
-        ).strip()
+        assert self._shard_input is not None
+        tokens = [
+            f"ome-zarr-tools migrate {self._path_field.value}",
+            f"--target_version {self._target_input.value}",
+        ]
+        shard_value = self._shard_input.value.strip()
+        if shard_value:
+            tokens.append(f"--chunks_per_shard {shard_value}")
+        return " ".join(tokens).strip()
+
+    def _parse_chunks_per_shard(self) -> tuple[int | None, str | None]:
+        """Returns ``(value, error)`` -- ``value`` is ``None`` if the field is blank
+        (no sharding requested) or parsing/validation failed, in which case
+        ``error`` is a message ready to show the user."""
+        assert self._shard_input is not None
+        assert self._target_input is not None
+        raw = self._shard_input.value.strip()
+        if not raw:
+            return None, None
+        try:
+            chunks_per_shard = int(raw)
+        except ValueError:
+            return None, "Chunks Per Shard must be a whole number"
+        try:
+            validate_chunks_per_shard(self._target_input.value.strip(), chunks_per_shard)
+        except CliError as exc:
+            return None, str(exc)
+        return chunks_per_shard, None
 
     def action_run(self) -> None:
         assert self._path_field is not None
@@ -212,7 +248,15 @@ class MigrateScreen(_BaseMetadataScreen):
             self._target_input.focus()
             self.notify("Target Version is required", severity="error")
             return
-        self.app.push_screen(MigrateConfirmScreen(self.command, Path(path_str), target_version))
+        chunks_per_shard, error = self._parse_chunks_per_shard()
+        if error is not None:
+            assert self._shard_input is not None
+            self._shard_input.focus()
+            self.notify(error, severity="error")
+            return
+        self.app.push_screen(
+            MigrateConfirmScreen(self.command, Path(path_str), target_version, chunks_per_shard)
+        )
 
     async def action_restore_defaults(self) -> None:
         await self.app.switch_screen(MigrateScreen(self.command))
@@ -444,9 +488,16 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
     Confirm applies the migration; nothing to restore (nothing is editable
     here), so no Restore Defaults binding."""
 
-    def __init__(self, command: click.Command, zarr_path: Path, target_version: str) -> None:
+    def __init__(
+        self,
+        command: click.Command,
+        zarr_path: Path,
+        target_version: str,
+        chunks_per_shard: int | None = None,
+    ) -> None:
         super().__init__(command, zarr_path)
         self.target_version = target_version
+        self.chunks_per_shard = chunks_per_shard
         group = zarr.open_group(str(zarr_path), mode="r")
         self._before: dict = dict(group.attrs)
         self._source_version = detect_version(group)
@@ -455,7 +506,7 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
         self._error: str | None = None
         if not self._nothing_to_do:
             try:
-                self._after = preview_migration(zarr_path, target_version)
+                self._after = preview_migration(zarr_path, target_version, chunks_per_shard)
             except Exception as exc:  # noqa: BLE001 -- surfaced via the status label, not raised
                 self._error = str(exc)
         self._status_label = Label("", id="confirm-status")
@@ -481,13 +532,17 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
         elif self._error:
             self._status_label.update(f"[red]{self._error}[/]")
         else:
-            self._status_label.update(
-                f"Migrating from {self._source_version} to {self.target_version}:"
-            )
+            status = f"Migrating from {self._source_version} to {self.target_version}"
+            if self.chunks_per_shard is not None:
+                status += f" (sharding: {self.chunks_per_shard} chunks/shard)"
+            self._status_label.update(f"{status}:")
             await self._diff_container.mount(build_side_by_side_diff(self._before, self._after))
 
     def _invocation_text(self) -> str:
-        return f"ome-zarr-tools migrate {self.zarr_path} --target_version {self.target_version}"
+        tokens = f"ome-zarr-tools migrate {self.zarr_path} --target_version {self.target_version}"
+        if self.chunks_per_shard is not None:
+            tokens += f" --chunks_per_shard {self.chunks_per_shard}"
+        return tokens
 
     def action_run(self) -> None:
         if self._nothing_to_do:
@@ -504,7 +559,7 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
         group = zarr.open_group(str(self.zarr_path), mode="r")
 
         def _work() -> None:
-            apply_migration(self.zarr_path, group, self.target_version)
+            apply_migration(self.zarr_path, group, self.target_version, self.chunks_per_shard)
 
         result_screen = MigrateResultScreen(self.command, self._before, self._after)
         self._pending_result = result_screen

@@ -14,7 +14,24 @@ from ome_zarr_tools.io.ome_metadata import detect_version, validate
 DEFAULT_TARGET_VERSION = "0.4"
 
 
-def preview_migration(path: Path, target_version: str) -> dict:
+def validate_chunks_per_shard(target_version: str, chunks_per_shard: int | None) -> None:
+    """Raise ``CliError`` if ``chunks_per_shard`` is set for a pre-0.5 target version.
+
+    Sharding is a Zarr v3 storage feature (OME-NGFF 0.5+); Zarr v2 (0.4) has no
+    concept of shards. ``ngff_zarr`` itself already rejects this combination, but
+    only once conversion actually starts -- this raises immediately, before any
+    zarr I/O, backup, or (on the CLI) the confirmation prompt. Shared by the CLI
+    command and the TUI's Form screen (``tui/screens/metadata_screen.py``), which
+    bypasses the CLI command entirely.
+    """
+    if chunks_per_shard is not None and target_version == DEFAULT_TARGET_VERSION:
+        raise CliError(
+            "--chunks_per_shard requires --target_version 0.5 or later "
+            f"-- sharding isn't supported by Zarr v2 (target version {target_version!r})."
+        )
+
+
+def preview_migration(path: Path, target_version: str, chunks_per_shard: int | None = None) -> dict:
     """Return the root attrs a migration to ``target_version`` would produce, without writing.
 
     Calls the same ``ngff_zarr`` conversion the real command uses, but targets an
@@ -31,12 +48,20 @@ def preview_migration(path: Path, target_version: str) -> dict:
 
     multiscales = nz.from_ngff_zarr(str(path), validate=False)
     store = zarr.storage.MemoryStore()
-    nz.to_ngff_zarr(store, multiscales, version=target_version, use_tensorstore=False)
+    nz.to_ngff_zarr(
+        store,
+        multiscales,
+        version=target_version,
+        use_tensorstore=False,
+        chunks_per_shard=chunks_per_shard,
+    )
     preview_group = zarr.open_group(store, mode="r")
     return dict(preview_group.attrs)
 
 
-def apply_migration(path: Path, group: zarr.Group, target_version: str) -> Path:
+def apply_migration(
+    path: Path, group: zarr.Group, target_version: str, chunks_per_shard: int | None = None
+) -> Path:
     """Back up, convert (real temp-then-swap write), and validate ``path`` to ``target_version``.
 
     Raises ``CliError`` (leaving the original dataset untouched) on failure.
@@ -58,7 +83,13 @@ def apply_migration(path: Path, group: zarr.Group, target_version: str) -> Path:
 
     try:
         multiscales = nz.from_ngff_zarr(str(path), validate=False)
-        nz.to_ngff_zarr(str(tmp_path), multiscales, version=target_version, use_tensorstore=False)
+        nz.to_ngff_zarr(
+            str(tmp_path),
+            multiscales,
+            version=target_version,
+            use_tensorstore=False,
+            chunks_per_shard=chunks_per_shard,
+        )
     except Exception as exc:
         if tmp_path.exists():
             shutil.rmtree(tmp_path)
@@ -90,8 +121,18 @@ def apply_migration(path: Path, group: zarr.Group, target_version: str) -> Path:
         "(0.4 -> Zarr v2, 0.5+ -> Zarr v3) -- not independently selectable."
     ),
 )
-def migrate(zarr_path: str, target_version: str) -> None:
+@click.option(
+    "--chunks_per_shard",
+    type=int,
+    default=None,
+    help=(
+        "Chunks per shard, per axis (isotropic). Requires --target_version 0.5 "
+        "or later -- Zarr v2 (0.4) has no concept of shards. Omit for no sharding."
+    ),
+)
+def migrate(zarr_path: str, target_version: str, chunks_per_shard: int | None) -> None:
     """Upgrade ZARR_PATH's OME-NGFF specification version (metadata and storage format together)."""
+    validate_chunks_per_shard(target_version, chunks_per_shard)
     path = Path(zarr_path)
     group = zarr.open_group(str(path), mode="r")
     source_version = detect_version(group)
@@ -108,6 +149,6 @@ def migrate(zarr_path: str, target_version: str) -> None:
         click.echo("Aborted. No changes were written.")
         return
 
-    backup_path = apply_migration(path, group, target_version)
+    backup_path = apply_migration(path, group, target_version, chunks_per_shard)
     click.echo(f"Backed up existing root attributes to {backup_path}")
     click.echo(f"Migrated {zarr_path} from {source_version} to {target_version}.")

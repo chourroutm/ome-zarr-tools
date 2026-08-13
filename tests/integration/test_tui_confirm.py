@@ -278,6 +278,103 @@ async def test_migrate_form_run_navigates_to_confirm_screen(legacy_v2_ome_zarr):
         assert isinstance(app.screen, MigrateConfirmScreen)
 
 
+async def test_migrate_form_chunks_per_shard_field_is_optional_and_blank(legacy_v2_ome_zarr):
+    from textual.containers import Vertical
+
+    app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        optional_frame = screen.query_one("#optional-frame", Vertical)
+        assert screen._shard_input in optional_frame.query(Input)
+        assert screen._shard_input.value == ""
+
+
+async def test_migrate_form_blocks_run_when_sharding_requested_below_0_5(legacy_v2_ome_zarr):
+    """FR: --chunks_per_shard requires --target_version 0.5+; the default target
+    (0.4) plus a sharding value must block Run with a clear error, not navigate."""
+    app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen._path_field.input.focus()
+        await pilot.press(*str(legacy_v2_ome_zarr))
+        screen._shard_input.focus()
+        await pilot.press(*"2")
+        await pilot.pause()
+
+        await pilot.press("f5")
+        await pilot.pause()
+
+        assert app.screen is screen  # blocked -- default target_version is 0.4
+
+
+async def test_migrate_form_blocks_run_when_chunks_per_shard_not_a_number(legacy_v2_ome_zarr):
+    app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen._path_field.input.focus()
+        await pilot.press(*str(legacy_v2_ome_zarr))
+        screen._target_input.focus()
+        for _ in range(len(screen._target_input.value)):
+            await pilot.press("backspace")
+        await pilot.press(*"0.5")
+        screen._shard_input.focus()
+        await pilot.press(*"not_a_number")
+        await pilot.pause()
+
+        await pilot.press("f5")
+        await pilot.pause()
+
+        assert app.screen is screen
+
+
+async def test_migrate_form_run_passes_chunks_per_shard_to_confirm_screen(legacy_v2_ome_zarr):
+    app = _ScreenApp(lambda: MigrateScreen(COMMANDS["migrate"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen._path_field.input.focus()
+        await pilot.press(*str(legacy_v2_ome_zarr))
+        screen._target_input.focus()
+        for _ in range(len(screen._target_input.value)):
+            await pilot.press("backspace")
+        await pilot.press(*"0.5")
+        screen._shard_input.focus()
+        await pilot.press(*"2")
+        await pilot.pause()
+
+        assert "--chunks_per_shard 2" in screen._invocation_text()
+
+        await pilot.press("f5")
+        await pilot.pause()
+
+        assert isinstance(app.screen, MigrateConfirmScreen)
+        assert app.screen.chunks_per_shard == 2
+        assert "--chunks_per_shard 2" in app.screen._invocation_text()
+
+
+async def test_migrate_confirm_applies_migration_with_sharding(legacy_v2_ome_zarr):
+    app = _ScreenApp(
+        lambda: MigrateConfirmScreen(COMMANDS["migrate"], legacy_v2_ome_zarr, "0.5", 2)
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("f5")
+        await pilot.pause()
+
+        assert isinstance(app.screen, MigrateResultScreen)
+        result_screen = app.screen
+        await _wait_for(pilot, lambda: result_screen._finished)
+        assert "succeeded" in str(result_screen._outcome_label.content)
+
+    migrated_group = zarr.open_group(str(legacy_v2_ome_zarr), mode="r")
+    assert migrated_group.metadata.zarr_format == 3
+    dataset_path = migrated_group.attrs["ome"]["multiscales"][0]["datasets"][0]["path"]
+    assert migrated_group[dataset_path].shards is not None
+
+
 async def test_migrate_confirm_nothing_to_do_shows_message_and_confirm_is_noop(
     legacy_v2_ome_zarr,
 ):
