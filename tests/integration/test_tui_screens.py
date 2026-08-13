@@ -81,6 +81,9 @@ async def test_inspect_screen_panels_match_build_report_after_run(sample_ome_zar
         for level in expected["levels"]:
             assert str(tuple(level["shape"])) in overview_text
             assert str(tuple(level["chunk_shape"])) in overview_text
+        assert expected["metadata_valid"] is True  # sanity: the version lines below only show then
+        assert f"OME-NGFF version: {expected['ome_ngff_version']}" in overview_text
+        assert f"Zarr version: {expected['zarr_version']}" in overview_text
 
 
 async def test_inspect_result_screen_uses_tabs_with_rich_formatting(sample_ome_zarr):

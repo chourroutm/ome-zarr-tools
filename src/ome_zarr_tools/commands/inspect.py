@@ -8,7 +8,7 @@ import zarr
 
 from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.core.zarr_path import ZarrPathParamType
-from ome_zarr_tools.io.ome_metadata import read_multiscales, validate
+from ome_zarr_tools.io.ome_metadata import detect_version, read_multiscales, validate
 
 
 def _stored_bytes(array: zarr.Array) -> int | None:
@@ -63,11 +63,17 @@ def build_report(zarr_path: str) -> dict:
         "total_stored_bytes": total_stored_bytes,
         "total_logical_bytes": sum(level["logical_bytes"] for level in levels),
         "metadata_valid": is_valid,
+        "ome_ngff_version": detect_version(group) if is_valid else None,
+        "zarr_version": group.metadata.zarr_format if is_valid else None,
     }
 
 
 def format_text(report: dict) -> str:
-    lines = [f"Dataset: {report['dataset']}", f"Metadata valid: {report['metadata_valid']}", ""]
+    lines = [f"Dataset: {report['dataset']}", f"Metadata valid: {report['metadata_valid']}"]
+    if report["metadata_valid"]:
+        lines.append(f"OME-NGFF version: {report['ome_ngff_version']}")
+        lines.append(f"Zarr version: {report['zarr_version']}")
+    lines.append("")
     for level in report["levels"]:
         lines.append(f"Level {level['path']}:")
         lines.append(f"  shape:        {tuple(level['shape'])}")

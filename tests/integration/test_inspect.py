@@ -45,6 +45,44 @@ def test_inspect_text_output_lists_levels(sample_ome_zarr):
     assert "Total stored size" in result.output
 
 
+def test_inspect_reports_ome_ngff_and_zarr_version_when_metadata_valid(sample_ome_zarr):
+    runner = CliRunner()
+    result = runner.invoke(inspect, [str(sample_ome_zarr), "--format", "json"])
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["metadata_valid"] is True
+    assert report["ome_ngff_version"] == "0.4"
+    assert report["zarr_version"] == 2
+
+    text_result = runner.invoke(inspect, [str(sample_ome_zarr)])
+    assert text_result.exit_code == 0, text_result.output
+    assert "OME-NGFF version: 0.4" in text_result.output
+    assert "Zarr version: 2" in text_result.output
+
+
+def test_inspect_omits_ome_ngff_and_zarr_version_when_metadata_invalid(sample_ome_zarr):
+    """Duplicate axis names make the metadata fail validation; the version fields
+    must not be shown/guessed at for a dataset that didn't validate."""
+    group = zarr.open_group(str(sample_ome_zarr), mode="r+")
+    attrs = dict(group.attrs)
+    multiscales = attrs["multiscales"]
+    multiscales[0]["axes"][0]["name"] = multiscales[0]["axes"][1]["name"]
+    group.attrs.put(attrs)
+
+    runner = CliRunner()
+    result = runner.invoke(inspect, [str(sample_ome_zarr), "--format", "json"])
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    assert report["metadata_valid"] is False
+    assert report["ome_ngff_version"] is None
+    assert report["zarr_version"] is None
+
+    text_result = runner.invoke(inspect, [str(sample_ome_zarr)])
+    assert text_result.exit_code == 0, text_result.output
+    assert "OME-NGFF version" not in text_result.output
+    assert "Zarr version" not in text_result.output
+
+
 def test_inspect_reports_a_clean_error_for_a_dataset_with_no_zarr_metadata(tmp_path):
     """No .zattrs/.zgroup/zarr.json anywhere (incomplete download) must not leak a traceback."""
     broken = tmp_path / "broken.ome.zarr"

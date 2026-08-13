@@ -49,6 +49,13 @@ def _build_overview(report: dict) -> Group:
     header.append(
         str(report["metadata_valid"]), style="green" if report["metadata_valid"] else "red"
     )
+    if report["metadata_valid"]:
+        header.append("\n")
+        header.append("OME-NGFF version: ", style="bold")
+        header.append(str(report["ome_ngff_version"]))
+        header.append("\n")
+        header.append("Zarr version: ", style="bold")
+        header.append(str(report["zarr_version"]))
 
     table = Table(show_header=True, header_style="bold", expand=True)
     table.add_column("Level")
