@@ -64,7 +64,7 @@ def _menu_option_prompt(name: str, command: click.Command) -> Group:
         Text(f"▎ {name}", style="bold"),
         Text(
             f"  {command_description(command)}",
-            style="dim",
+            style="#7f9cae",
             no_wrap=True,
             overflow="crop",
         ),
