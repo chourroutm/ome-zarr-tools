@@ -8,13 +8,14 @@ from ome_zarr_tools.tui.app import InteractiveTUIApp
 def test_interactive_runs_from_images(tmp_path, image_stack_dir):
     out = tmp_path / "out.zarr"
     runner = CliRunner()
-    # Menu selection "5" = from_images (alphabetically last of the 5 US1 commands).
+    # Menu selection "6" = from_images (alphabetical position among all registered
+    # commands: apply_mask, config, downsample, extract, fix_metadata, from_images, ...).
     # Prompts in declaration order: --stack_dir, --stack_pattern, --vol_file,
     # --voxel_size (multiple; blank line to stop), --voxel_size_unit, --num_downsampling,
     # --chunk_size, OUTPUT_ZARR argument, then the final "Run this now?" confirm.
     answers = "\n".join(
         [
-            "5",  # select from_images
+            "6",  # select from_images
             str(image_stack_dir),  # --stack_dir
             "",  # --stack_pattern (skip)
             "",  # --vol_file (skip)
@@ -50,11 +51,13 @@ def test_interactive_prompt_flow_unchanged_regression(tmp_path):
         "Available commands:\n"
         "  1. apply_mask\n"
         "  2. config\n"
-        "  3. extract\n"
-        "  4. fix_metadata\n"
-        "  5. from_images\n"
-        "  6. inspect\n"
-        "  7. migrate\n"
+        "  3. downsample\n"
+        "  4. extract\n"
+        "  5. fix_metadata\n"
+        "  6. from_images\n"
+        "  7. inspect\n"
+        "  8. migrate\n"
+        "  9. upsample\n"
     ) in result.output
     assert "Select a command:" in result.output
     assert "\n--- config ---\n" in result.output
@@ -68,7 +71,7 @@ def test_interactive_cancel_leaves_no_side_effects(tmp_path, image_stack_dir):
     runner = CliRunner()
     answers = "\n".join(
         [
-            "5",
+            "6",  # select from_images
             str(image_stack_dir),
             "",
             "",

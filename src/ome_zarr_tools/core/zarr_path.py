@@ -10,14 +10,30 @@ and rejects any URL outright, before the command body ever runs.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import click
+
+from ome_zarr_tools.core.errors import CliError
 
 _REMOTE_SCHEMES = ("gs://", "gcs://", "s3://", "http://", "https://", "az://", "abfs://")
 
 
 def is_remote_path(value: str) -> bool:
     return value.startswith(_REMOTE_SCHEMES)
+
+
+def validate_output_path(output_path: Path | None) -> None:
+    """Raise ``CliError`` if ``output_path`` is given and already exists.
+
+    A fresh output location is always created new -- overwriting an existing
+    path silently (as ``ngff_zarr`` would do on its own) risks destroying
+    whatever was already there. Shared by every command that offers an
+    optional ``--output`` (``migrate``, ``downsample``, ``upsample``) and
+    their TUI Form screens, instead of each duplicating this check.
+    """
+    if output_path is not None and output_path.exists():
+        raise CliError(f"{output_path} already exists; choose a new path or remove it first.")
 
 
 class ZarrPathParamType(click.Path):

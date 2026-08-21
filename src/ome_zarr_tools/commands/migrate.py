@@ -8,7 +8,7 @@ import zarr
 
 from ome_zarr_tools.core.backup import backup_attrs
 from ome_zarr_tools.core.errors import CliError
-from ome_zarr_tools.core.zarr_path import ZarrPathParamType
+from ome_zarr_tools.core.zarr_path import ZarrPathParamType, validate_output_path
 from ome_zarr_tools.io.ome_metadata import detect_version, validate
 
 DEFAULT_TARGET_VERSION = "0.5"
@@ -33,18 +33,6 @@ def validate_chunks_per_shard(target_version: str, chunks_per_shard: int | None)
             "--chunks_per_shard requires --target_version 0.5 or later "
             f"-- sharding isn't supported by Zarr v2 (target version {target_version!r})."
         )
-
-
-def validate_output_path(output_path: Path | None) -> None:
-    """Raise ``CliError`` if ``output_path`` is given and already exists.
-
-    A fresh output location is always created new -- overwriting an existing
-    path silently (as ``ngff_zarr`` would do on its own) risks destroying
-    whatever was already there. Shared by the CLI command and the TUI's Form
-    screen, same reasoning as ``validate_chunks_per_shard``.
-    """
-    if output_path is not None and output_path.exists():
-        raise CliError(f"{output_path} already exists; choose a new path or remove it first.")
 
 
 def _convert_and_validate(

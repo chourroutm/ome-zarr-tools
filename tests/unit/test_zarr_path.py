@@ -1,7 +1,8 @@
 import click
 import pytest
 
-from ome_zarr_tools.core.zarr_path import ZarrPathParamType, is_remote_path
+from ome_zarr_tools.core.errors import CliError
+from ome_zarr_tools.core.zarr_path import ZarrPathParamType, is_remote_path, validate_output_path
 
 
 @pytest.mark.parametrize(
@@ -40,3 +41,18 @@ def test_zarr_path_param_type_accepts_existing_local_path(tmp_path):
     real_dir.mkdir()
     param_type = ZarrPathParamType(exists=True)
     assert param_type.convert(str(real_dir), None, None) == str(real_dir)
+
+
+def test_validate_output_path_none_is_a_noop():
+    validate_output_path(None)  # must not raise
+
+
+def test_validate_output_path_nonexistent_is_a_noop(tmp_path):
+    validate_output_path(tmp_path / "does-not-exist-yet.zarr")  # must not raise
+
+
+def test_validate_output_path_rejects_existing_path(tmp_path):
+    existing = tmp_path / "already-here.zarr"
+    existing.mkdir()
+    with pytest.raises(CliError, match="already exists"):
+        validate_output_path(existing)

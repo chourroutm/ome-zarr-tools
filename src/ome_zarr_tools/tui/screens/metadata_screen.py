@@ -34,9 +34,9 @@ from ome_zarr_tools.commands.migrate import (
     apply_migration,
     preview_migration,
     validate_chunks_per_shard,
-    validate_output_path,
 )
 from ome_zarr_tools.core.errors import CliError
+from ome_zarr_tools.core.zarr_path import validate_output_path
 from ome_zarr_tools.io.ome_metadata import detect_version, read_multiscales
 from ome_zarr_tools.tui.diff import build_side_by_side_diff
 from ome_zarr_tools.tui.execution import ExecutionResult, run_in_background

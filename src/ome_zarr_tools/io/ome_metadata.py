@@ -22,6 +22,25 @@ def read_multiscales(group: zarr.Group) -> list[dict[str, Any]] | None:
     return multiscales if isinstance(multiscales, list) else None
 
 
+def write_multiscales(group: zarr.Group, multiscales: list[dict[str, Any]]) -> None:
+    """Write ``multiscales`` back in whichever shape ``group``'s own attrs already
+    use -- 0.5+'s nested ``attrs["ome"]["multiscales"]``, or 0.4's top-level
+    ``attrs["multiscales"]`` -- mirroring :func:`read_multiscales`'s own dual-shape
+    read logic, so round-tripping through the two never changes which shape a
+    dataset uses. Other keys already present under ``attrs["ome"]`` (e.g. its own
+    ``version``) are preserved.
+    """
+    attrs = dict(group.attrs)
+    ome = attrs.get("ome")
+    if isinstance(ome, dict) and isinstance(ome.get("multiscales"), list):
+        ome = dict(ome)
+        ome["multiscales"] = multiscales
+        attrs["ome"] = ome
+    else:
+        attrs["multiscales"] = multiscales
+    group.attrs.put(attrs)
+
+
 def detect_version(group: zarr.Group) -> str | None:
     """Return the dataset's OME-NGFF specification version, or ``None`` if undetectable."""
     try:

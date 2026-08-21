@@ -1,4 +1,38 @@
-from ome_zarr_tools.io.ome_metadata import add_half_pixel_translations
+import zarr
+
+from ome_zarr_tools.io.ome_metadata import (
+    add_half_pixel_translations,
+    read_multiscales,
+    write_multiscales,
+)
+
+
+def test_write_multiscales_round_trips_legacy_top_level_shape(tmp_path):
+    group = zarr.open_group(str(tmp_path / "legacy.zarr"), mode="w")
+    group.attrs["multiscales"] = [{"version": "0.4", "datasets": [{"path": "0"}]}]
+
+    new_multiscales = [{"version": "0.4", "datasets": [{"path": "0"}, {"path": "1"}]}]
+    write_multiscales(group, new_multiscales)
+
+    assert "ome" not in group.attrs
+    assert group.attrs["multiscales"] == new_multiscales
+    assert read_multiscales(group) == new_multiscales
+
+
+def test_write_multiscales_round_trips_ome_nested_shape(tmp_path):
+    group = zarr.open_group(str(tmp_path / "modern.zarr"), mode="w")
+    group.attrs["ome"] = {
+        "version": "0.5",
+        "multiscales": [{"version": "0.5", "datasets": [{"path": "0"}]}],
+    }
+
+    new_multiscales = [{"version": "0.5", "datasets": [{"path": "0"}, {"path": "1"}]}]
+    write_multiscales(group, new_multiscales)
+
+    assert "multiscales" not in group.attrs
+    assert group.attrs["ome"]["multiscales"] == new_multiscales
+    assert group.attrs["ome"]["version"] == "0.5"  # other "ome" keys preserved
+    assert read_multiscales(group) == new_multiscales
 
 
 def test_add_half_pixel_translations_anchors_level_0_at_zero():
