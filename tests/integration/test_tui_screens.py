@@ -14,7 +14,11 @@ from textual.widgets import Input, Static, TextArea
 from ome_zarr_tools.cli import cli
 from ome_zarr_tools.commands.config import read_config, target_config_path
 from ome_zarr_tools.commands.inspect import build_report
-from ome_zarr_tools.tui.screens.config_screen import ConfigResultScreen, ConfigScreen
+from ome_zarr_tools.tui.screens.config_screen import (
+    ConfigResultScreen,
+    ConfigScreen,
+    DefaultEntryButton,
+)
 from ome_zarr_tools.tui.screens.inspect_screen import InspectResultScreen, InspectScreen
 
 COMMANDS = {name: cmd for name, cmd in cli.commands.items() if name != "interactive"}
@@ -176,8 +180,9 @@ async def test_inspect_screen_run_executes_the_real_cli_command(sample_ome_zarr)
     assert "succeeded" in str(result_screen._outcome_label.content)
 
 
-async def test_config_screen_current_and_defaults_match_scope(monkeypatch, tmp_path: Path):
-    """T026: switching scope shows that scope's values (matching `config show`) and defaults."""
+async def test_config_screen_editor_and_defaults_match_scope(monkeypatch, tmp_path: Path):
+    """T026: switching scope pre-fills the editor with that scope's current values
+    (matching `config show`), alongside the built-in defaults view."""
     monkeypatch.setenv("HOME", str(tmp_path))  # never touch the real shared $HOME on this host
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -191,10 +196,10 @@ async def test_config_screen_current_and_defaults_match_scope(monkeypatch, tmp_p
         screen = app.screen
 
         # Default scope is "user"; no user config file exists yet.
-        current = screen.query_one("#current-view", TextArea)
-        assert json.loads(current.text) == {}
-        defaults = screen.query_one("#defaults-view", TextArea)
-        assert json.loads(defaults.text)["target_version"] == "0.5"  # migrate's CLI default
+        editor = screen.query_one("#editor", TextArea)
+        assert json.loads(editor.text) == {}
+        default_keys = {b.default_key for b in screen._defaults_view.query(DefaultEntryButton)}
+        assert "target_version" in default_keys  # migrate's CLI default
 
         screen._scope_select.value = "project"
         await pilot.pause()
@@ -203,8 +208,141 @@ async def test_config_screen_current_and_defaults_match_scope(monkeypatch, tmp_p
         await pilot.press(*str(project_dir))
         await pilot.pause()
 
-        assert json.loads(current.text) == read_config(target_config_path(False, str(project_dir)))
-        assert json.loads(current.text) == {"voxel_size_unit": "nanometer"}
+        assert json.loads(editor.text) == read_config(target_config_path(False, str(project_dir)))
+        assert json.loads(editor.text) == {"voxel_size_unit": "nanometer"}
+
+
+def _default_button(screen, key: str) -> DefaultEntryButton:
+    return next(b for b in screen._defaults_view.query(DefaultEntryButton) if b.default_key == key)
+
+
+async def test_config_screen_default_buttons_are_left_aligned(monkeypatch, tmp_path: Path):
+    """The click-to-insert defaults look like real JSON lines: left-aligned,
+    2-space indented, with a trailing comma -- not centered pills."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    app = _ConfigApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        button = _default_button(screen, "target_version")
+        assert button.styles.text_align == "left"
+        assert button.styles.content_align == ("left", "middle")
+        assert button.label.plain == '  "target_version": "0.5",'
+
+
+async def test_config_screen_defaults_view_wraps_buttons_in_braces(monkeypatch, tmp_path: Path):
+    """The defaults block reads like a real JSON object: an unindented `{`
+    and `}` around the buttons, and no trailing comma on the last one."""
+    from textual.widgets import Label as _Label
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    app = _ConfigApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        children = list(screen._defaults_view.children)
+        assert isinstance(children[0], _Label)
+        assert str(children[0].content) == "{"
+        assert isinstance(children[-1], _Label)
+        assert str(children[-1].content) == "}"
+        buttons = [c for c in children if isinstance(c, DefaultEntryButton)]
+        assert buttons  # sanity: at least one default is registered
+        assert all(b.label.plain.endswith(",") for b in buttons[:-1])
+        assert not buttons[-1].label.plain.endswith(",")
+
+
+async def test_config_screen_default_button_background_is_uniform_until_hover(
+    monkeypatch, tmp_path: Path
+):
+    """Default entries share one flat background at rest -- only :hover (and
+    the pointer cursor) signal that they're clickable."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    app = _ConfigApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        buttons = list(screen._defaults_view.query(DefaultEntryButton))
+        base_backgrounds = {b.styles.background for b in buttons}
+        assert len(base_backgrounds) == 1  # uniform across every entry
+        assert all(b.styles.border_top[0] == "" for b in buttons)  # no border/bevel
+
+        target = _default_button(screen, "target_version")
+        target.scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.hover(target)
+        await pilot.pause()
+
+        assert target.styles.background != base_backgrounds.pop()
+
+
+async def test_config_screen_default_button_inserts_key_as_new_line_with_comma(
+    monkeypatch, tmp_path: Path
+):
+    """FR-017: clicking a built-in default on an empty object adds `"key": `
+    as its own line, cursor landing right after the colon; clicking a second,
+    different default adds another line and commas the first one."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    app = _ConfigApp()
+    async with app.run_test(size=(100, 60)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        editor = screen.query_one("#editor", TextArea)
+        assert editor.text == "{}"
+
+        button = _default_button(screen, "target_version")
+        button.scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.click(button)
+        await pilot.pause()
+
+        assert editor.text == '{\n  "target_version": \n}'
+        assert editor.cursor_location == (1, 20)  # right after `  "target_version": `
+
+        editor.insert('"0.5"')  # simulate the user typing a value
+        await pilot.pause()
+
+        second_key = next(
+            b.default_key
+            for b in screen._defaults_view.query(DefaultEntryButton)
+            if b.default_key != "target_version"
+        )
+        second_button = _default_button(screen, second_key)
+        second_button.scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.click(second_button)
+        await pilot.pause()
+
+        assert editor.text == (f'{{\n  "target_version": "0.5",\n  "{second_key}": \n}}')
+
+
+async def test_config_screen_default_button_places_cursor_in_existing_value(
+    monkeypatch, tmp_path: Path
+):
+    """Clicking a default that's already present in the editor leaves its
+    current value untouched, just moving the cursor to its start -- rather
+    than duplicating the key or erasing what's there."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    app = _ConfigApp()
+    async with app.run_test(size=(100, 60)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        editor = screen.query_one("#editor", TextArea)
+        editor.text = '{\n  "target_version": "0.4"\n}'
+        await pilot.pause()
+
+        button = _default_button(screen, "target_version")
+        button.scroll_visible(animate=False)
+        await pilot.pause()
+        await pilot.click(button)
+        await pilot.pause()
+
+        assert editor.text == '{\n  "target_version": "0.4"\n}'  # untouched
+        assert editor.cursor_location == (1, 20)  # right at the start of "0.4"
 
 
 async def test_config_screen_save_reproduces_config_set_and_blocks_invalid_json(
