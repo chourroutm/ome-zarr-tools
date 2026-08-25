@@ -67,6 +67,24 @@ def test_downsample_output_rejects_existing_path(tmp_path, sample_ome_zarr):
     assert "already exists" in result.output
 
 
+def test_downsample_skips_stray_array_left_behind_by_an_earlier_interrupted_run(sample_ome_zarr):
+    """Regression: a stray array at the path downsample would otherwise pick
+    next (e.g. left behind by an earlier run interrupted before it could
+    clean up) must not make this run fail with "an array already exists" --
+    it should just pick the next path beyond it instead."""
+    group = zarr.open_group(str(sample_ome_zarr), mode="r+")
+    group.create_array("2", shape=(1, 1, 1), dtype="uint8", chunks=(1, 1, 1))  # not in datasets
+
+    runner = CliRunner()
+    result = runner.invoke(downsample, [str(sample_ome_zarr)])
+    assert result.exit_code == 0, result.output
+
+    group = zarr.open_group(str(sample_ome_zarr), mode="r")
+    paths = _level_paths(group)
+    assert paths[-1] == "3"
+    assert group[paths[-1]].shape == (4, 8, 8)
+
+
 def test_downsample_rejects_dataset_with_no_multiscales_metadata(tmp_path):
     broken = tmp_path / "broken.zarr"
     zarr.open_group(str(broken), mode="w")  # a bare group, no multiscales at all

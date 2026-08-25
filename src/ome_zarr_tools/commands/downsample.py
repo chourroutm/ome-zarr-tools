@@ -46,7 +46,7 @@ def _build_new_coarser_levels(zarr_path: Path, num_levels: int) -> list[NewLevel
     )
     result = nz.to_multiscales(image, scale_factors=[2**i for i in range(1, num_levels + 1)])
 
-    new_paths = next_new_paths(existing_datasets, num_levels)
+    new_paths = next_new_paths(existing_datasets, num_levels, group=group)
     new_levels = []
     for path, new_image in zip(new_paths, result.images[1:], strict=True):
         chunk_shape = tuple(

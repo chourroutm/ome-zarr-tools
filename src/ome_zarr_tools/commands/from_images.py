@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Literal
 
 import click
 import zarr
 
+from ome_zarr_tools.commands.migrate import DEFAULT_TARGET_VERSION, validate_chunks_per_shard
 from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.io.images import read_stack, read_volume
-from ome_zarr_tools.io.ome_metadata import add_half_pixel_translations
+from ome_zarr_tools.io.ome_metadata import (
+    add_half_pixel_translations,
+    read_multiscales,
+    write_multiscales,
+)
+
+_ZARR_FORMAT_BY_TARGET_VERSION: dict[str, Literal[2, 3]] = {"0.4": 2, "0.5": 3}
+"""OME-NGFF version -> Zarr storage format, matching ``migrate.py``'s convention
+(0.4 -> Zarr v2, 0.5 -> Zarr v3) and the only two ``zarr_format`` values
+``bioio_ome_zarr``'s ``OMEZarrWriter`` accepts."""
 
 
 def _level_shapes(shape: tuple[int, ...], num_downsampling: int) -> list[tuple[int, ...]]:
@@ -71,6 +81,25 @@ def _level_shapes(shape: tuple[int, ...], num_downsampling: int) -> list[tuple[i
     show_default=True,
     help="Isotropic chunk edge length.",
 )
+@click.option(
+    "--target_version",
+    type=click.Choice(sorted(_ZARR_FORMAT_BY_TARGET_VERSION)),
+    default=DEFAULT_TARGET_VERSION,
+    show_default=True,
+    help=(
+        "OME-NGFF specification version to write. Implies the Zarr storage "
+        "format (0.4 -> Zarr v2, 0.5 -> Zarr v3) -- not independently selectable."
+    ),
+)
+@click.option(
+    "--chunks_per_shard",
+    type=int,
+    default=None,
+    help=(
+        "Chunks per shard, per axis (isotropic). Requires --target_version 0.5 "
+        "-- Zarr v2 (0.4) has no concept of shards. Omit for no sharding."
+    ),
+)
 @click.argument("output_zarr", type=click.Path())
 def from_images(
     stack_dir: str | None,
@@ -80,6 +109,8 @@ def from_images(
     voxel_size_unit: str,
     num_downsampling: int,
     chunk_size: int,
+    target_version: str,
+    chunks_per_shard: int | None,
     output_zarr: str,
 ) -> None:
     """Convert a 2D image stack or a 3D volume file to OME-Zarr at OUTPUT_ZARR."""
@@ -90,6 +121,8 @@ def from_images(
     if len(voxel_size) not in (1, 3):
         raise CliError("--voxel_size must be given as 1 or 3 values.")
     voxel_size_tuple = tuple(voxel_size) * 3 if len(voxel_size) == 1 else tuple(voxel_size)
+
+    validate_chunks_per_shard(target_version, chunks_per_shard)
 
     if vol_file:
         click.echo(f"Using 3D image file: {vol_file}")
@@ -113,7 +146,8 @@ def from_images(
         level_shapes=level_shapes,
         dtype=arr.dtype,
         chunk_shape=(chunk_size,) * 3,
-        zarr_format=2,
+        shard_shape=(chunks_per_shard * chunk_size,) * 3 if chunks_per_shard is not None else None,
+        zarr_format=_ZARR_FORMAT_BY_TARGET_VERSION[target_version],
         image_name="Image",
         axes_names=["z", "y", "x"],
         axes_types=["space", "space", "space"],
@@ -124,10 +158,10 @@ def from_images(
     writer.write_full_volume(arr)
 
     group = zarr.open_group(str(output_zarr), mode="r+")
-    attrs = dict(group.attrs)
-    multiscales = cast("list[dict[str, Any]]", attrs["multiscales"])
+    multiscales = read_multiscales(group)
+    assert multiscales is not None  # the writer above always emits multiscales metadata
     multiscales[0]["datasets"] = add_half_pixel_translations(multiscales[0]["datasets"])
-    group.attrs.put(attrs)
+    write_multiscales(group, multiscales)
 
     click.echo(
         f"Saved OME-Zarr at {output_zarr} with shape {arr.shape} "

@@ -43,3 +43,23 @@ def test_voxel_size_arity_validated(tmp_path, image_stack_dir):
     )
     assert result.exit_code != 0
     assert "1 or 3" in result.output
+
+
+def test_chunks_per_shard_requires_target_version_0_5(tmp_path, image_stack_dir):
+    runner = CliRunner()
+    result = runner.invoke(
+        from_images,
+        [
+            "--stack_dir",
+            str(image_stack_dir),
+            "--voxel_size",
+            "1.0",
+            "--target_version",
+            "0.4",
+            "--chunks_per_shard",
+            "2",
+            str(tmp_path / "out.zarr"),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--target_version 0.5" in result.output

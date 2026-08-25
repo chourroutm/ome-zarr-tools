@@ -65,7 +65,7 @@ def _build_new_finer_levels(
     if not isinstance(finest_array, zarr.Array):
         raise CliError(f"{finest['path']!r} is not an array in this dataset.")
 
-    new_paths = next_new_paths(existing_datasets, num_levels)
+    new_paths = next_new_paths(existing_datasets, num_levels, group=group)
     new_levels: list[NewLevel] = []
     source_array: da.Array = da.from_array(finest_array, chunks=finest_array.chunks)
     source_scale = list(finest_scale)

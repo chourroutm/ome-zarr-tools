@@ -12,7 +12,8 @@ def test_interactive_runs_from_images(tmp_path, image_stack_dir):
     # commands: apply_mask, config, downsample, extract, fix_metadata, from_images, ...).
     # Prompts in declaration order: --stack_dir, --stack_pattern, --vol_file,
     # --voxel_size (multiple; blank line to stop), --voxel_size_unit, --num_downsampling,
-    # --chunk_size, OUTPUT_ZARR argument, then the final "Run this now?" confirm.
+    # --chunk_size, --target_version, --shard_size, OUTPUT_ZARR argument, then the
+    # final "Run this now?" confirm.
     answers = "\n".join(
         [
             "6",  # select from_images
@@ -24,6 +25,8 @@ def test_interactive_runs_from_images(tmp_path, image_stack_dir):
             "",  # --voxel_size_unit (accept default)
             "",  # --num_downsampling (accept default)
             "",  # --chunk_size (accept default)
+            "",  # --target_version (accept default)
+            "",  # --shard_size (skip)
             str(out),  # OUTPUT_ZARR argument
             "y",  # Run this now?
             "",
@@ -76,6 +79,8 @@ def test_interactive_cancel_leaves_no_side_effects(tmp_path, image_stack_dir):
             "",
             "",
             "1.0",
+            "",
+            "",
             "",
             "",
             "",

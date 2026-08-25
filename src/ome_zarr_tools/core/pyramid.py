@@ -45,16 +45,24 @@ class NewLevel:
     scale: list[float]
 
 
-def next_new_paths(existing_datasets: list[dict[str, Any]], n: int) -> list[str]:
+def next_new_paths(
+    existing_datasets: list[dict[str, Any]], n: int, group: zarr.Group | None = None
+) -> list[str]:
     """Return ``n`` fresh ``path`` strings that don't collide with any of
-    ``existing_datasets``'s own paths -- continuing past the highest existing
-    integer-parseable path (or starting at ``"0"`` if none parse as an int).
+    ``existing_datasets``'s own paths, or -- when ``group`` is given -- any
+    array/group member actually present on disk (e.g. a stray array left
+    behind by an interrupted prior run, never recorded in ``datasets``, that
+    would otherwise make the coming ``group.create_array()`` fail with "an
+    array already exists at path ..."). Continues past the highest existing
+    integer-parseable path (or starts at ``"0"`` if none parse as an int).
     Per the OME-NGFF spec, ``path`` is an arbitrary string identifier with no
     ordering meaning of its own (research.md), so these new paths carry no
     claim about where the new levels sit in the ``datasets`` list -- that's
     ``commit_new_levels()``'s ``position`` argument, entirely separate.
     """
     used = {d["path"] for d in existing_datasets}
+    if group is not None:
+        used |= set(group.array_keys()) | set(group.group_keys())
     next_int = 0
     for dataset in existing_datasets:
         try:
@@ -74,9 +82,29 @@ def next_new_paths(existing_datasets: list[dict[str, Any]], n: int) -> list[str]
 
 
 def _remove_arrays(group: zarr.Group, paths: list[str]) -> None:
+    """Delete each of ``paths`` from ``group``, tolerating paths that don't
+    actually exist there. Deliberately does *not* guard with ``if path in
+    group`` first: a group opened with (auto-detected) consolidated metadata
+    reports membership from that cached listing, which a just-created array
+    isn't reflected in until the group is explicitly re-consolidated -- so
+    that guard would silently skip deleting an array this same call just
+    wrote, leaving it orphaned on disk for a future run to collide with.
+    """
     for path in paths:
-        if path in group:
+        try:
             del group[path]
+        except KeyError:
+            pass
+
+
+def _next_unused_int_path(used: set[str], start: int) -> tuple[str, int]:
+    """Return the first ``str(candidate)`` (``candidate >= start``) not in
+    ``used``, and ``candidate + 1`` (so callers can pass it back in as the
+    next call's ``start``)."""
+    candidate = start
+    while str(candidate) in used:
+        candidate += 1
+    return str(candidate), candidate + 1
 
 
 def commit_new_levels(
@@ -93,26 +121,64 @@ def commit_new_levels(
     just before. Raises ``CliError`` on failure, leaving ``group`` exactly as
     it was before this call either way.
     """
+    multiscales = read_multiscales(group)
+    if not multiscales:
+        raise CliError(f"No multiscales metadata found in {path}.")
+    # Zarr v3 (OME-NGFF 0.5+) arrays carry their own per-axis dimension_names,
+    # which ome_zarr_models' validation requires -- read_multiscales's own
+    # dual-shape support means multiscales[0]["axes"] is available regardless
+    # of which of the two attrs shapes this dataset uses. Zarr v2 (0.4) has no
+    # such concept and raises if passed one at all, so this is None there.
+    dimension_names = (
+        [axis["name"] for axis in multiscales[0]["axes"]]
+        if group.metadata.zarr_format == 3
+        else None
+    )
+
+    # Seeds next_int / used for the collision-retry below: existing_datasets'
+    # own paths, plus every path already claimed by an earlier level in this
+    # same batch (next_new_paths() already steered new_levels away from these,
+    # but a group opened with stale consolidated metadata can still make
+    # create_array() below hit a real collision it didn't know to avoid).
+    used_paths = {d["path"] for d in multiscales[0]["datasets"]}
+    next_candidate = 0
+    for used_path in used_paths:
+        try:
+            next_candidate = max(next_candidate, int(used_path) + 1)
+        except (ValueError, TypeError):
+            continue
+
     written_paths: list[str] = []
     try:
         for level in new_levels:
-            target = group.create_array(
-                level.path, shape=level.array.shape, dtype=level.array.dtype, chunks=level.chunks
-            )
+            while True:
+                try:
+                    target = group.create_array(
+                        level.path,
+                        shape=level.array.shape,
+                        dtype=level.array.dtype,
+                        chunks=level.chunks,
+                        dimension_names=dimension_names,
+                    )
+                    break
+                except (zarr.errors.ContainsArrayError, zarr.errors.ContainsGroupError):
+                    # A stray array/group from an earlier interrupted run, invisible
+                    # to next_new_paths()'s own collision check (see _remove_arrays'
+                    # docstring) -- claim the next integer path instead of failing.
+                    used_paths.add(level.path)
+                    level.path, next_candidate = _next_unused_int_path(used_paths, next_candidate)
             # dask's stubs don't recognize a zarr.Array as a valid store target,
             # though it is one at runtime (this is the documented way to write a
             # dask array into a specific array within an already-open zarr group).
             da.store(da.asarray(level.array), target)  # type: ignore[arg-type]
             written_paths.append(level.path)
+            used_paths.add(level.path)
     except Exception as exc:
         _remove_arrays(group, written_paths)
         raise CliError(f"Adding levels failed; nothing written to {path}. Details: {exc}") from exc
 
     backup_path = backup_attrs(path, group)
     try:
-        multiscales = read_multiscales(group)
-        if not multiscales:
-            raise CliError(f"No multiscales metadata found in {path}.")
         existing_datasets = multiscales[0]["datasets"]
         new_entries = [
             {
