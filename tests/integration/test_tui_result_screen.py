@@ -192,6 +192,24 @@ async def test_error_detail_wraps_within_screen_width_not_clipped():
         assert error_label.region.height >= 2  # must have wrapped, not overflowed on 1 line
 
 
+async def test_error_containing_bracket_characters_does_not_crash():
+    """A real exception message can itself contain literal ``[...]``/``=``
+    text (e.g. a Python dict repr from a validation error) -- Rich must not
+    mistake that for markup and raise ``MarkupError`` when it's shown."""
+    app = _ScreenApp(lambda: InspectResultScreen(COMMANDS["inspect"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        from ome_zarr_tools.tui.execution import ExecutionResult
+
+        bracket_error = "validation failed: axes=[{'name': 'z', 'type': 'space'}], input_type=dict]"
+        await screen.finish(ExecutionResult(succeeded=False, error=bracket_error))
+        await pilot.pause()
+
+        error_label = screen.query_one("#error-detail")
+        assert bracket_error in str(error_label.content)
+
+
 async def test_blocked_run_does_not_navigate():
     app = InteractiveTUIApp(COMMANDS)
     async with app.run_test() as pilot:

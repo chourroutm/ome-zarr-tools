@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import click
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -102,7 +103,10 @@ class CommandResultScreen(Screen[None]):
             self._error_label.display = False
         else:
             self._outcome_label.update(f"[red]✗ {self.command.name} failed.[/]")
-            self._error_label.update(f"[red]{result.error}[/]")
+            # result.error is arbitrary exception text (often a repr containing its own
+            # literal [...] / = characters, e.g. a dict repr) -- escape it so Rich's
+            # markup parser doesn't mistake it for markup tags and raise MarkupError.
+            self._error_label.update(f"[red]{escape(result.error or '')}[/]")
             self._error_label.display = True
         await self._content_container.remove_children()
         await self._content_container.mount_all(list(self.compose_result_content()))

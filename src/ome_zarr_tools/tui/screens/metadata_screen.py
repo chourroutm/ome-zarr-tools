@@ -17,6 +17,7 @@ from pathlib import Path
 
 import click
 import zarr
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
@@ -568,7 +569,10 @@ class MigrateConfirmScreen(_BaseConfirmScreen):
                 f"[green]✓ Already at version {self.target_version}; nothing to do.[/]"
             )
         elif self._error:
-            self._status_label.update(f"[red]{self._error}[/]")
+            # self._error is arbitrary exception text (may itself contain literal
+            # [...] / = characters) -- escape it so Rich's markup parser doesn't
+            # mistake it for markup tags and raise MarkupError.
+            self._status_label.update(f"[red]{escape(self._error)}[/]")
         else:
             status = f"Migrating from {self._source_version} to {self.target_version}"
             if self.chunks_per_shard is not None:
