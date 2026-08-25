@@ -1,6 +1,6 @@
 # OME-Zarr Tools CLI
 
-Command-line tools for working with OME-Zarr multiscale datasets (also known as OME-NGFF). New datasets are written against [the OME-Zarr 0.4 specification](https://ngff.openmicroscopy.org/0.4/index.html) by default; `migrate` can bring datasets up to later versions (0.5+, on Zarr v3 storage).
+Command-line tools for working with OME-Zarr multiscale datasets (also known as OME-NGFF). New datasets are written against [the OME-Zarr 0.5 specification](https://ngff.openmicroscopy.org/0.5/index.html) by default (Zarr v3 storage); `migrate` can also target the earlier 0.4 specification (Zarr v2 storage).
 
 ## Installation
 
@@ -45,7 +45,7 @@ Any `ZARR_PATH`/`--volume`/`--mask` argument accepts either a local path or a re
 
   There's no button or confirmation dialog in `--tui` — every command screen shares the same footer shortcuts, in the same order: `F5` Run (`Save` for `config`), `F6` Copy, `F7` Copy & exit, `F8` toggle the Command Log, `Esc` back to the menu, `Ctrl+C` cancel. Copy and Copy & exit compute the equivalent direct CLI invocation on demand and place it on the clipboard; it isn't shown as a live preview on screen. Once Run is pressed, a live status indicator tracks the command (a progress bar when the remaining work has a countable total, otherwise an animated sparkline), and the log (hidden by default) captures the same output a direct CLI run would print. A few commands get their own richer screen instead of the plain field form: `fix_metadata`/`migrate` always show a diff of current vs. proposed metadata plus a structured view (directly editable for `fix_metadata`); `inspect` shows a scrollable per-level JSON panel and a structure-summary panel, switchable with `F9` (appended after the shared shortcuts); `config` shows a user/project scope picker, the effective values vs. the tool's built-in defaults, and an editable JSON editor for the underlying config file.
 
-- **`migrate`** — Upgrade an OME-Zarr dataset to a target OME-NGFF specification version (`--target_version`, default `0.4`). Since the specification couples metadata version to Zarr storage format (0.4 → Zarr v2, 0.5+ → Zarr v3), migrating also converts storage as needed.
+- **`migrate`** — Upgrade an OME-Zarr dataset to a target OME-NGFF specification version (`--target_version`, default `0.5`). Since the specification couples metadata version to Zarr storage format (0.4 → Zarr v2, 0.5+ → Zarr v3), migrating also converts storage as needed.
 
 - **`inspect`** — Report, per resolution level and dataset-wide, shape, dtype, chunk shape, shard shape, on-disk (stored) size, and logical (uncompressed) size. Read-only. Options: `--format text|json`. On-disk size requires listing the store's chunk keys; against a remote store that allows anonymous object reads but not bucket listing, it's reported as unavailable rather than failing the whole command.
 

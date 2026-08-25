@@ -196,7 +196,7 @@ async def test_tui_tokens_match_prompt_wizard_for_equivalent_answers(monkeypatch
     monkeypatch.chdir(tmp_path)
     apply_mask = COMMANDS["apply_mask"]
 
-    answers = iter(["vol.zarr", "mask.zarr", "0.5", "n"])
+    answers = iter(["vol.zarr", "mask.zarr", "0.5", ""])
     monkeypatch.setattr(click, "prompt", lambda *a, **k: next(answers))
     monkeypatch.setattr(click, "confirm", lambda *a, **k: False)
 

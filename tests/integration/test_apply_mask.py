@@ -1,7 +1,18 @@
+import hashlib
+
 import zarr
 from click.testing import CliRunner
 
 from ome_zarr_tools.commands.apply_mask import apply_mask
+
+
+def _checksum_dir(path) -> str:
+    digest = hashlib.sha256()
+    for f in sorted(path.rglob("*")):
+        if f.is_file():
+            digest.update(f.name.encode())
+            digest.update(f.read_bytes())
+    return digest.hexdigest()
 
 
 def test_apply_mask_success(tmp_path, sample_ome_zarr, sample_mask_zarr):
@@ -29,3 +40,33 @@ def test_apply_mask_no_matching_scale_is_failure(tmp_path, sample_ome_zarr):
     runner = CliRunner()
     result = runner.invoke(apply_mask, ["--volume", str(sample_ome_zarr), "--mask", str(mask_path)])
     assert result.exit_code != 0
+
+
+def test_apply_mask_output_leaves_original_untouched(tmp_path, sample_ome_zarr, sample_mask_zarr):
+    before_checksum = _checksum_dir(sample_ome_zarr)
+    output = tmp_path / "masked.zarr"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        apply_mask,
+        ["--volume", str(sample_ome_zarr), "--mask", str(sample_mask_zarr), "--output", str(output)],
+    )
+    assert result.exit_code == 0, result.output
+
+    assert _checksum_dir(sample_ome_zarr) == before_checksum
+    before = zarr.open_group(str(sample_ome_zarr), mode="r")["0"][:].sum()
+    after = zarr.open_group(str(output), mode="r")["0"][:].sum()
+    assert after <= before
+
+
+def test_apply_mask_output_rejects_existing_path(tmp_path, sample_ome_zarr, sample_mask_zarr):
+    output = tmp_path / "already_here.zarr"
+    output.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(
+        apply_mask,
+        ["--volume", str(sample_ome_zarr), "--mask", str(sample_mask_zarr), "--output", str(output)],
+    )
+    assert result.exit_code != 0
+    assert "already exists" in result.output

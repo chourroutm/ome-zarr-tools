@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import click
@@ -10,7 +11,7 @@ import zarr
 
 from ome_zarr_tools.core.backup import backup_attrs
 from ome_zarr_tools.core.errors import CliError
-from ome_zarr_tools.core.zarr_path import ZarrPathParamType
+from ome_zarr_tools.core.zarr_path import ZarrPathParamType, validate_output_path
 
 
 def upsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
@@ -60,10 +61,28 @@ def downsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
     is_flag=True,
     help="Reserved for CLI compatibility; mask resampling is always applied automatically.",
 )
-def apply_mask(volume: str, mask: str, threshold: float, temporary_upsample: bool) -> None:
+@click.option(
+    "--output",
+    type=click.Path(),
+    default=None,
+    help=(
+        "Write the masked volume to this new path instead of masking --volume "
+        "in place; --volume is left completely untouched. Must not already "
+        "exist. Omit to mask --volume in place (default)."
+    ),
+)
+def apply_mask(
+    volume: str, mask: str, threshold: float, temporary_upsample: bool, output: str | None
+) -> None:
     """Apply a binary mask to an OME-Zarr volume, resampled to match each resolution level."""
     volume_path = Path(volume)
     mask_path = Path(mask)
+    output_path = Path(output) if output else None
+    validate_output_path(output_path)
+
+    if output_path is not None:
+        shutil.copytree(volume_path, output_path)
+        volume_path = output_path
 
     click.echo(f"Applying mask {mask_path} -> {volume_path}")
     volume_store = zarr.open_group(str(volume_path), mode="r+")
