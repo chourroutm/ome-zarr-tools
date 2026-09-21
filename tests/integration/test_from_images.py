@@ -1,3 +1,4 @@
+import pytest
 import zarr
 from click.testing import CliRunner
 
@@ -92,6 +93,47 @@ def test_from_images_chunks_per_shard_shards_the_output(tmp_path, image_stack_di
     array = group["0"]
     assert array.chunks == (8, 8, 8)
     assert array.shards == (16, 16, 16)
+
+
+def test_from_images_odd_dimension_scale_matches_actual_on_disk_shape(
+    tmp_path, odd_image_stack_dir
+):
+    """Regression: scale metadata must be derived from the level's real
+    (lazily-declared) output shape, never an independently precomputed one --
+    for an odd-sized dimension, the antialiased downsampling's own ceiling-
+    division convention (17 -> 9) diverges from a naive floor-division
+    precompute (17 -> 8), which would otherwise silently record a scale
+    value that doesn't correspond to what's actually on disk.
+    """
+    runner = CliRunner()
+    out = tmp_path / "out.zarr"
+    result = runner.invoke(
+        from_images,
+        [
+            "--stack_dir",
+            str(odd_image_stack_dir),
+            "--voxel_size",
+            "2.0",
+            "--num_downsampling",
+            "1",
+            "--chunk_size",
+            "8",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    group = zarr.open_group(str(out), mode="r")
+    assert group["0"].shape == (9, 17, 17)
+    assert group["1"].shape == (5, 9, 9)
+
+    datasets = group.attrs["ome"]["multiscales"][0]["datasets"]
+    scale_1 = datasets[1]["coordinateTransformations"][0]["scale"]
+    assert scale_1 == [
+        pytest.approx(2.0 * 9 / 5),
+        pytest.approx(2.0 * 17 / 9),
+        pytest.approx(2.0 * 17 / 9),
+    ]
 
 
 def test_from_images_failure_conflicting_inputs(tmp_path, image_stack_dir):

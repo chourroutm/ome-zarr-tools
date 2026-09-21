@@ -1,5 +1,6 @@
 import hashlib
 
+import numpy as np
 import zarr
 from click.testing import CliRunner
 
@@ -112,3 +113,14 @@ def test_downsample_in_place_leaves_existing_levels_byte_for_byte_unchanged(samp
     assert result.exit_code == 0, result.output
 
     assert _existing_level_contents(sample_ome_zarr) == before
+
+
+def test_downsample_label_never_produces_a_value_absent_from_the_source(sample_mask_zarr):
+    runner = CliRunner()
+    result = runner.invoke(downsample, [str(sample_mask_zarr), "--label"])
+    assert result.exit_code == 0, result.output
+
+    group = zarr.open_group(str(sample_mask_zarr), mode="r")
+    new_path = _level_paths(group)[-1]
+    new_values = set(np.unique(group[new_path][:]).tolist())
+    assert new_values <= {0, 1}

@@ -15,7 +15,7 @@ def test_upsample_help_lists_all_options():
     result = runner.invoke(upsample, ["--help"])
     assert result.exit_code == 0
     assert "--num_levels" in result.output
-    assert "--smooth" in result.output
+    assert "--label" in result.output
     assert "--output" in result.output
 
 

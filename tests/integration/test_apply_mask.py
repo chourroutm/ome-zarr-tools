@@ -1,5 +1,6 @@
 import hashlib
 
+import numpy as np
 import zarr
 from click.testing import CliRunner
 
@@ -49,7 +50,14 @@ def test_apply_mask_output_leaves_original_untouched(tmp_path, sample_ome_zarr, 
     runner = CliRunner()
     result = runner.invoke(
         apply_mask,
-        ["--volume", str(sample_ome_zarr), "--mask", str(sample_mask_zarr), "--output", str(output)],
+        [
+            "--volume",
+            str(sample_ome_zarr),
+            "--mask",
+            str(sample_mask_zarr),
+            "--output",
+            str(output),
+        ],
     )
     assert result.exit_code == 0, result.output
 
@@ -59,6 +67,38 @@ def test_apply_mask_output_leaves_original_untouched(tmp_path, sample_ome_zarr, 
     assert after <= before
 
 
+def test_apply_mask_downsampled_mask_never_introduces_a_value_absent_from_the_source(
+    sample_ome_zarr, sample_finer_mask_zarr
+):
+    """The mask needs downsampling to match whichever scale ``apply_mask``
+    picks as ``matching_scale`` (both fixtures share keys "0" and "1", and
+    zarr's own key iteration order -- not this test -- decides which one
+    that is) -- the result must still be exactly binary (0/1) multiplication,
+    never a blended/invented mask value (the mask is always treated as label
+    data). If the mask were ever fractional, some voxel would end up neither
+    zeroed out nor equal to its original value. Checks both levels (whichever
+    one actually got masked, plus the untouched one trivially satisfies the
+    same invariant) and confirms at least one level really was modified, so
+    the test can't pass vacuously against a dataset nothing touched.
+    """
+    before = {
+        level: zarr.open_group(str(sample_ome_zarr), mode="r")[level][:] for level in ("0", "1")
+    }
+
+    runner = CliRunner()
+    result = runner.invoke(
+        apply_mask, ["--volume", str(sample_ome_zarr), "--mask", str(sample_finer_mask_zarr)]
+    )
+    assert result.exit_code == 0, result.output
+
+    after = {
+        level: zarr.open_group(str(sample_ome_zarr), mode="r")[level][:] for level in ("0", "1")
+    }
+    for level in ("0", "1"):
+        assert np.all((after[level] == 0) | (after[level] == before[level]))
+    assert any(not np.array_equal(after[level], before[level]) for level in ("0", "1"))
+
+
 def test_apply_mask_output_rejects_existing_path(tmp_path, sample_ome_zarr, sample_mask_zarr):
     output = tmp_path / "already_here.zarr"
     output.mkdir()
@@ -66,7 +106,14 @@ def test_apply_mask_output_rejects_existing_path(tmp_path, sample_ome_zarr, samp
     runner = CliRunner()
     result = runner.invoke(
         apply_mask,
-        ["--volume", str(sample_ome_zarr), "--mask", str(sample_mask_zarr), "--output", str(output)],
+        [
+            "--volume",
+            str(sample_ome_zarr),
+            "--mask",
+            str(sample_mask_zarr),
+            "--output",
+            str(output),
+        ],
     )
     assert result.exit_code != 0
     assert "already exists" in result.output

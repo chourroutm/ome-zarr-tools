@@ -6,34 +6,12 @@ from pathlib import Path
 import click
 import dask.array as da
 import numpy as np
-import skimage.measure
 import zarr
 
 from ome_zarr_tools.core.backup import backup_attrs
 from ome_zarr_tools.core.errors import CliError
+from ome_zarr_tools.core.resample import label_downsample, nearest_upsample
 from ome_zarr_tools.core.zarr_path import ZarrPathParamType, validate_output_path
-
-
-def upsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
-    """Upsample by integer factor using nearest-neighbor repeat (lazy)."""
-    if factor != 2:
-        raise ValueError("Only upsample factor 2 is supported.")
-    return mask_da.repeat(factor, axis=0).repeat(factor, axis=1).repeat(factor, axis=2)
-
-
-def downsample_mask(mask_da: da.Array, factor: int = 2) -> da.Array:
-    """Downsample lazily by local mean pooling using ``skimage.measure.block_reduce``."""
-    if factor != 2:
-        raise ValueError("Only downsample factor 2 is supported.")
-
-    def _reduce_block(block: np.ndarray) -> np.ndarray:
-        pads = np.array(block.shape) % factor
-        if any(p != 0 for p in pads):
-            block = np.pad(block, [(0, int(p)) for p in pads], mode="edge")
-        return skimage.measure.block_reduce(block, block_size=(2, 2, 2), func=np.mean)
-
-    new_chunks: tuple[int, ...] = tuple(max(1, c[0] // factor) for c in mask_da.chunks)
-    return mask_da.map_blocks(_reduce_block, dtype=mask_da.dtype, chunks=new_chunks)  # type: ignore[call-arg,arg-type]
 
 
 @click.command(name="apply_mask")
@@ -103,10 +81,13 @@ def apply_mask(
 
     if mask_da.shape < vol_arr.shape:
         click.echo("Upsampling mask by factor 2...")
-        mask_da = upsample_mask(mask_da)
+        mask_da = nearest_upsample(mask_da)
     elif mask_da.shape > vol_arr.shape:
         click.echo("Downsampling mask by factor 2...")
-        mask_da = downsample_mask(mask_da)
+        # The mask is a label array (binary, in this thresholded form) --
+        # label_downsample() stays lazy/chunk-wise (see core/resample.py),
+        # same as downsample/upsample's own label-aware paths.
+        mask_da = label_downsample(mask_da)
 
     for scale_key, vol_z in volume_store.arrays():
         click.echo(f"Applying mask to scale {scale_key}...")

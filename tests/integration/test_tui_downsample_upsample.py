@@ -5,7 +5,7 @@ CLI group (the TUI's command list is read straight from `cli.commands`)."""
 
 from __future__ import annotations
 
-from textual.widgets import Input, OptionList
+from textual.widgets import Checkbox, Input, OptionList
 
 from ome_zarr_tools.cli import cli
 from ome_zarr_tools.tui.app import CommandFormScreen, InteractiveTUIApp
@@ -44,6 +44,7 @@ async def test_downsample_appears_in_menu_and_uses_generic_form():
         assert path_field.input.id == "field-zarr_path"
         assert screen.query_one("#field-num_levels", Input).value == "1"
         assert screen.query_one("#field-output", Input).value == ""
+        assert screen.query_one("#field-label", Checkbox).value is False
 
 
 async def test_downsample_run_executes_and_lands_on_generic_result_screen(sample_ome_zarr):
@@ -88,7 +89,7 @@ async def test_upsample_appears_in_menu_and_uses_generic_form():
         path_field = next(s.widget for s in screen._field_specs if isinstance(s.widget, PathField))
         assert path_field.input.id == "field-zarr_path"
         assert screen.query_one("#field-num_levels", Input).value == "1"
-        assert screen.query_one("#field-smooth", Input).value == ""
+        assert screen.query_one("#field-label", Checkbox).value is False
         assert screen.query_one("#field-output", Input).value == ""
 
 

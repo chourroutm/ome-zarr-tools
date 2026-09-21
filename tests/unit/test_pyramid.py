@@ -1,13 +1,20 @@
 import copy
 import shutil
 
+import dask
 import dask.array as da
 import numpy as np
 import pytest
+import skimage.transform
 import zarr
 
 from ome_zarr_tools.core.errors import CliError
-from ome_zarr_tools.core.pyramid import NewLevel, commit_new_levels, next_new_paths
+from ome_zarr_tools.core.pyramid import (
+    NewLevel,
+    commit_new_levels,
+    next_new_paths,
+    write_new_pyramid,
+)
 from ome_zarr_tools.io.ome_metadata import read_multiscales, validate
 
 
@@ -216,3 +223,116 @@ def test_commit_new_levels_output_mode_copies_dataset_leaves_original_untouched(
     assert sorted(f.name for f in source.iterdir()) == before_files
     result_group = zarr.open_group(str(output), mode="r")
     assert "2" in list(result_group.array_keys())
+
+
+def test_write_new_pyramid_scale_metadata_matches_actual_shape_for_odd_dimensions(tmp_path):
+    """Regression: scale must be derived from the level's real (lazily-declared)
+    output shape, never an independently precomputed one -- for an odd-sized
+    dimension, skimage's own ceiling-division convention (17 -> 9) diverges
+    from a naive floor-division precompute (17 -> 8), which would otherwise
+    silently record a scale value that doesn't correspond to what's on disk.
+    """
+    path = tmp_path / "odd.zarr"
+    arr = da.from_array(np.zeros((17, 17, 17), dtype="uint8"), chunks=(8, 8, 8))
+
+    write_new_pyramid(
+        path,
+        arr,
+        1,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=["micrometer"] * 3,
+        voxel_size=[2.0, 2.0, 2.0],
+        chunk_shape=(8, 8, 8),
+        shard_shape=None,
+        zarr_format=2,
+        image_name="Image",
+    )
+
+    group = zarr.open_group(str(path), mode="r")
+    assert group["1"].shape == (9, 9, 9)
+    scale = group.attrs["multiscales"][0]["datasets"][1]["coordinateTransformations"][0]["scale"]
+    assert scale == pytest.approx([2.0 * 17 / 9] * 3)
+
+
+def test_write_new_pyramid_issues_one_combined_store_call_not_one_per_level(tmp_path):
+    """Regression: separate da.store() calls per level would recompute every
+    shared upstream step once per level -- one combined call must read the
+    source exactly once regardless of how many levels are built from it.
+    """
+    path = tmp_path / "batched.zarr"
+    data = np.zeros((16, 16, 16), dtype="uint8")
+    calls = {"n": 0}
+
+    def _load() -> np.ndarray:
+        calls["n"] += 1
+        return data
+
+    arr = da.from_delayed(dask.delayed(_load)(), shape=data.shape, dtype=data.dtype).rechunk(
+        (8, 8, 8)
+    )
+
+    write_new_pyramid(
+        path,
+        arr,
+        2,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=["micrometer"] * 3,
+        voxel_size=[1.0, 1.0, 1.0],
+        chunk_shape=(8, 8, 8),
+        shard_shape=None,
+        zarr_format=2,
+        image_name="Image",
+    )
+
+    assert calls["n"] == 1
+
+
+def test_write_new_pyramid_never_processes_more_than_one_chunk_at_a_time(tmp_path):
+    """FR-007/SC-003: memory use per processing step must be bounded
+    independent of total dataset size. Rather than an OS-level memory limit
+    (platform-inconsistent, risks killing the test process outright instead
+    of failing cleanly), this instruments every array actually handed to the
+    downsampling function and asserts each one is exactly one chunk's worth
+    of data -- never the whole (much larger) array -- proving the mechanism
+    that makes boundedness true by construction.
+    """
+    path = tmp_path / "large.zarr"
+    chunk_shape = (4, 4, 4)
+    # 8x more voxels along each axis than a single chunk (512x more total)
+    # -- if any call ever saw the whole array, its shape would be nowhere
+    # near chunk_shape. Kept modest (8**3 = 512 chunks) so the test itself
+    # stays fast: this is about proving per-call boundedness, not actually
+    # exercising a large dataset end to end.
+    arr = da.zeros((32, 32, 32), chunks=chunk_shape, dtype="uint8")
+
+    seen_shapes: list[tuple[int, ...]] = []
+
+    def _tracking_downsample_func(block, **kwargs):
+        seen_shapes.append(block.shape)
+        return skimage.transform.pyramid_gaussian(block, **kwargs)
+
+    write_new_pyramid(
+        path,
+        arr,
+        1,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=["micrometer"] * 3,
+        voxel_size=[1.0, 1.0, 1.0],
+        chunk_shape=chunk_shape,
+        shard_shape=None,
+        zarr_format=2,
+        image_name="Image",
+        downsample_func=_tracking_downsample_func,
+    )
+
+    assert seen_shapes  # the downsample path was actually exercised
+    # dask internally probes the block function once with an empty
+    # (all-zero-dim) array to infer output dtype/meta -- harmless, not a
+    # real materialization -- every *real* call must still be exactly one
+    # chunk's worth of data, never anywhere close to the full 32x32x32 array.
+    real_shapes = [shape for shape in seen_shapes if 0 not in shape]
+    assert real_shapes
+    assert all(shape == chunk_shape for shape in real_shapes)

@@ -21,7 +21,6 @@ dependencies = [
     "natsort>=8.4",
     "scikit-image>=0.23",
     "ome-zarr-models>=0.1.4",
-    "bioio-ome-zarr>=1.1",
     "ngff-zarr>=0.14",
     "textual>=8.0",
     "textual-autocomplete>=4.0",

@@ -11,11 +11,17 @@ import zarr
 
 from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.core.pyramid import NewLevel, commit_new_levels, next_new_paths
+from ome_zarr_tools.core.resample import nearest_upsample
 from ome_zarr_tools.core.zarr_path import ZarrPathParamType, validate_output_path
 from ome_zarr_tools.io.ome_metadata import read_multiscales
 
+_LABEL_SMOOTH_SIGMA = 1.0
+"""Fixed Gaussian sigma used by ``--label`` to soften a newly upsampled
+level's blocky nearest-neighbor edges -- one voxel's worth of blur, enough to
+visibly round a boundary without needing a user-tunable knob for it."""
 
-def _smooth_labels(level: np.ndarray, sigma: float) -> np.ndarray:
+
+def _smooth_labels(level: np.ndarray, sigma: float = _LABEL_SMOOTH_SIGMA) -> np.ndarray:
     """Soften ``level``'s label boundaries, re-snapping every voxel to the
     nearest *original* discrete label value (FR-010) -- never leaving a
     blurred/non-discrete value. Decomposes into one channel per distinct
@@ -31,19 +37,7 @@ def _smooth_labels(level: np.ndarray, sigma: float) -> np.ndarray:
     return labels[np.argmax(channels, axis=0)].astype(level.dtype)
 
 
-def _upsample_once(array: da.Array) -> da.Array:
-    """Exact 2x nearest-neighbor expansion per spatial axis -- every voxel of
-    the result is one that already existed in ``array`` (never interpolated),
-    which is what makes discreteness (FR-009) true by construction."""
-    upsampled = array
-    for axis in range(array.ndim):
-        upsampled = da.repeat(upsampled, 2, axis=axis)
-    return upsampled
-
-
-def _build_new_finer_levels(
-    zarr_path: Path, num_levels: int, smooth: float | None
-) -> list[NewLevel]:
+def _build_new_finer_levels(zarr_path: Path, num_levels: int, label: bool) -> list[NewLevel]:
     """Read ``zarr_path``'s existing finest level and build ``num_levels`` new,
     progressively finer levels above it. Each new level upsamples the one
     before it (not always the original finest), so ``num_levels`` levels form
@@ -71,9 +65,9 @@ def _build_new_finer_levels(
     source_scale = list(finest_scale)
     source_chunks = finest_array.chunks
     for path in new_paths:
-        upsampled = _upsample_once(source_array)
-        if smooth is not None:
-            smoothed_np = _smooth_labels(upsampled.compute(), smooth)
+        upsampled = nearest_upsample(source_array)
+        if label:
+            smoothed_np = _smooth_labels(upsampled.compute())
             upsampled = da.from_array(smoothed_np, chunks=source_chunks)
         new_scale = [s / 2 for s in source_scale]
         new_levels.append(
@@ -101,13 +95,16 @@ def _build_new_finer_levels(
     help="Number of new, progressively finer levels to add.",
 )
 @click.option(
-    "--smooth",
-    type=float,
-    default=None,
+    "--label",
+    is_flag=True,
     help=(
-        "Gaussian sigma to soften label boundaries with. Every voxel of the "
-        "result is still snapped to one of the original label values -- never "
-        "a blurred/non-discrete value. Omit for no smoothing."
+        "Treat ZARR_PATH as label/segmentation data: soften each newly "
+        "upsampled level's blocky nearest-neighbor edges by decomposing into "
+        "one probability channel per distinct label value, smoothing each "
+        "independently, and re-snapping every voxel to the highest-probability "
+        "channel -- never a blurred/non-discrete value. Omit to skip smoothing "
+        "and keep the exact nearest-neighbor expansion (still label-safe, just "
+        "blockier)."
     ),
 )
 @click.option(
@@ -120,7 +117,7 @@ def _build_new_finer_levels(
         "already exist. Omit to upsample ZARR_PATH in place (default)."
     ),
 )
-def upsample(zarr_path: str, num_levels: int, smooth: float | None, output: str | None) -> None:
+def upsample(zarr_path: str, num_levels: int, label: bool, output: str | None) -> None:
     """Add finer multiscale levels above ZARR_PATH's existing finest level.
 
     Meant for label/mask datasets: new levels are built by exact
@@ -133,7 +130,7 @@ def upsample(zarr_path: str, num_levels: int, smooth: float | None, output: str 
     validate_output_path(output_path)
 
     path = Path(zarr_path)
-    new_levels = _build_new_finer_levels(path, num_levels, smooth)
+    new_levels = _build_new_finer_levels(path, num_levels, label)
 
     if output_path is not None:
         shutil.copytree(path, output_path)

@@ -8,6 +8,7 @@ import zarr
 
 from ome_zarr_tools.commands.migrate import DEFAULT_TARGET_VERSION, validate_chunks_per_shard
 from ome_zarr_tools.core.errors import CliError
+from ome_zarr_tools.core.pyramid import write_new_pyramid
 from ome_zarr_tools.io.images import read_stack, read_volume
 from ome_zarr_tools.io.ome_metadata import (
     add_half_pixel_translations,
@@ -17,15 +18,7 @@ from ome_zarr_tools.io.ome_metadata import (
 
 _ZARR_FORMAT_BY_TARGET_VERSION: dict[str, Literal[2, 3]] = {"0.4": 2, "0.5": 3}
 """OME-NGFF version -> Zarr storage format, matching ``migrate.py``'s convention
-(0.4 -> Zarr v2, 0.5 -> Zarr v3) and the only two ``zarr_format`` values
-``bioio_ome_zarr``'s ``OMEZarrWriter`` accepts."""
-
-
-def _level_shapes(shape: tuple[int, ...], num_downsampling: int) -> list[tuple[int, ...]]:
-    levels = [tuple(shape)]
-    for _ in range(num_downsampling):
-        levels.append(tuple(max(1, s // 2) for s in levels[-1]))
-    return levels
+(0.4 -> Zarr v2, 0.5 -> Zarr v3)."""
 
 
 @click.command(name="from_images")
@@ -134,28 +127,19 @@ def from_images(
     arr = arr.rechunk(chunk_size)
     click.echo(f"Converting to OME-Zarr at {output_zarr} (shape={arr.shape})")
 
-    level_shapes = _level_shapes(arr.shape, num_downsampling)
-
-    try:
-        from bioio_ome_zarr.writers import OMEZarrWriter
-    except ImportError as exc:
-        raise CliError(f"bioio-ome-zarr is not installed: {exc}") from exc
-
-    writer = OMEZarrWriter(
-        str(output_zarr),
-        level_shapes=level_shapes,
-        dtype=arr.dtype,
+    write_new_pyramid(
+        Path(output_zarr),
+        arr,
+        num_downsampling,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=[voxel_size_unit] * 3,
+        voxel_size=list(voxel_size_tuple),
         chunk_shape=(chunk_size,) * 3,
         shard_shape=(chunks_per_shard * chunk_size,) * 3 if chunks_per_shard is not None else None,
         zarr_format=_ZARR_FORMAT_BY_TARGET_VERSION[target_version],
         image_name="Image",
-        axes_names=["z", "y", "x"],
-        axes_types=["space", "space", "space"],
-        axes_units=[voxel_size_unit] * 3,
-        physical_pixel_size=list(voxel_size_tuple),
     )
-    writer.initialize()
-    writer.write_full_volume(arr)
 
     group = zarr.open_group(str(output_zarr), mode="r+")
     multiscales = read_multiscales(group)
