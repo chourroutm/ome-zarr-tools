@@ -47,7 +47,7 @@ class StatusPanel(Vertical):
         super().__init__()
         self._sparkline: Sparkline = Sparkline([0.0] * 20, id="status-sparkline")
         self._progress: ProgressBar = ProgressBar(id="status-progress")
-        self._log: RichLog = RichLog(id="status-log", max_lines=500)
+        self._log: RichLog = RichLog(id="status-log", max_lines=500, wrap=True)
         self._quantified = False
         self._animation_timer: Timer | None = None
 

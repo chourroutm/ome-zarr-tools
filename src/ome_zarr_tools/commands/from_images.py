@@ -61,7 +61,7 @@ _ZARR_FORMAT_BY_TARGET_VERSION: dict[str, Literal[2, 3]] = {"0.4": 2, "0.5": 3}
     help="Unit for voxel size.",
 )
 @click.option(
-    "--num_downsampling",
+    "--num_levels",
     type=int,
     default=0,
     show_default=True,
@@ -100,7 +100,7 @@ def from_images(
     vol_file: str | None,
     voxel_size: tuple[float, ...],
     voxel_size_unit: str,
-    num_downsampling: int,
+    num_levels: int,
     chunk_size: int,
     target_version: str,
     chunks_per_shard: int | None,
@@ -130,7 +130,7 @@ def from_images(
     write_new_pyramid(
         Path(output_zarr),
         arr,
-        num_downsampling,
+        num_levels,
         axes_names=["z", "y", "x"],
         axes_types=["space", "space", "space"],
         axes_units=[voxel_size_unit] * 3,
@@ -149,5 +149,5 @@ def from_images(
 
     click.echo(
         f"Saved OME-Zarr at {output_zarr} with shape {arr.shape} "
-        f"and {num_downsampling} downsampled level(s)"
+        f"and {num_levels} downsampled level(s)"
     )

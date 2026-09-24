@@ -12,8 +12,8 @@ from textual.app import App
 from textual.widgets import Input, Static, TextArea
 
 from ome_zarr_tools.cli import cli
-from ome_zarr_tools.commands.config import read_config, target_config_path
 from ome_zarr_tools.commands.inspect import build_report
+from ome_zarr_tools.core.env_file import read_env_file
 from ome_zarr_tools.tui.screens.config_screen import (
     ConfigResultScreen,
     ConfigScreen,
@@ -180,185 +180,132 @@ async def test_inspect_screen_run_executes_the_real_cli_command(sample_ome_zarr)
     assert "succeeded" in str(result_screen._outcome_label.content)
 
 
-async def test_config_screen_editor_and_defaults_match_scope(monkeypatch, tmp_path: Path):
-    """T026: switching scope pre-fills the editor with that scope's current values
-    (matching `config show`), alongside the built-in defaults view."""
-    monkeypatch.setenv("HOME", str(tmp_path))  # never touch the real shared $HOME on this host
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-    (project_dir / "ome-zarr-tools.config").write_text(
-        json.dumps({"voxel_size_unit": "nanometer"}), encoding="utf-8"
-    )
-
-    app = _ConfigApp()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        screen = app.screen
-
-        # Default scope is "user"; no user config file exists yet.
-        editor = screen.query_one("#editor", TextArea)
-        assert json.loads(editor.text) == {}
-        default_keys = {b.default_key for b in screen._defaults_view.query(DefaultEntryButton)}
-        assert "target_version" in default_keys  # migrate's CLI default
-
-        screen._scope_select.value = "project"
-        await pilot.pause()
-        project_input = screen.query_one("#field-project_dir", Input)
-        project_input.focus()
-        await pilot.press(*str(project_dir))
-        await pilot.pause()
-
-        assert json.loads(editor.text) == read_config(target_config_path(False, str(project_dir)))
-        assert json.loads(editor.text) == {"voxel_size_unit": "nanometer"}
-
-
 def _default_button(screen, key: str) -> DefaultEntryButton:
     return next(b for b in screen._defaults_view.query(DefaultEntryButton) if b.default_key == key)
 
 
-async def test_config_screen_default_buttons_are_left_aligned(monkeypatch, tmp_path: Path):
-    """The click-to-insert defaults look like real JSON lines: left-aligned,
-    2-space indented, with a trailing comma -- not centered pills."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+async def test_config_screen_default_buttons_are_registry_driven():
+    """FR-010: the click-to-insert defaults are sourced from the
+    `CONFIGURABLE_VARIABLES` registry (corrected variable names), not the old
+    buggy per-option introspection that silently collided `extract`/`inspect`'s
+    `output_format`."""
+    app = _ConfigApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        button = _default_button(screen, "OME_ZARR_TOOLS_TARGET_VERSION")
+        assert "OME_ZARR_TOOLS_TARGET_VERSION" in button.label.plain
+        assert "0.5" in button.label.plain
+
+
+async def test_config_screen_has_a_button_for_every_registry_variable():
+    """Regression: every one of the 13 registry variables must have a
+    clickable entry, including ones whose target option's own CLI default is
+    `None` (--chunks_per_shard, --smooth) -- those default to "omit the flag"
+    on the CLI, but are still legitimate configurable variables, and must not
+    be silently dropped from the TUI's reference view."""
+    from ome_zarr_tools.core.config_registry import CONFIGURABLE_VARIABLES
 
     app = _ConfigApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
-        button = _default_button(screen, "target_version")
-        assert button.styles.text_align == "left"
-        assert button.styles.content_align == ("left", "middle")
-        assert button.label.plain == '  "target_version": "0.5",'
+        button_keys = {b.default_key for b in screen._defaults_view.query(DefaultEntryButton)}
+        assert button_keys == {v.name for v in CONFIGURABLE_VARIABLES}
+
+        for name in ("OME_ZARR_TOOLS_CHUNKS_PER_SHARD", "OME_ZARR_TOOLS_UPSAMPLE_SMOOTH"):
+            button = _default_button(screen, name)
+            assert button.label.plain == f"{name}="  # blank value, not the literal "None"
 
 
-async def test_config_screen_defaults_view_wraps_buttons_in_braces(monkeypatch, tmp_path: Path):
-    """The defaults block reads like a real JSON object: an unindented `{`
-    and `}` around the buttons, and no trailing comma on the last one."""
-    from textual.widgets import Label as _Label
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    app = _ConfigApp()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        screen = app.screen
-        children = list(screen._defaults_view.children)
-        assert isinstance(children[0], _Label)
-        assert str(children[0].content) == "{"
-        assert isinstance(children[-1], _Label)
-        assert str(children[-1].content) == "}"
-        buttons = [c for c in children if isinstance(c, DefaultEntryButton)]
-        assert buttons  # sanity: at least one default is registered
-        assert all(b.label.plain.endswith(",") for b in buttons[:-1])
-        assert not buttons[-1].label.plain.endswith(",")
-
-
-async def test_config_screen_default_button_background_is_uniform_until_hover(
-    monkeypatch, tmp_path: Path
+async def test_config_screen_default_button_with_none_default_inserts_blank_value(
+    tmp_path: Path,
 ):
-    """Default entries share one flat background at rest -- only :hover (and
-    the pointer cursor) signal that they're clickable."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    app = _ConfigApp()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        screen = app.screen
-        buttons = list(screen._defaults_view.query(DefaultEntryButton))
-        base_backgrounds = {b.styles.background for b in buttons}
-        assert len(base_backgrounds) == 1  # uniform across every entry
-        assert all(b.styles.border_top[0] == "" for b in buttons)  # no border/bevel
-
-        target = _default_button(screen, "target_version")
-        target.scroll_visible(animate=False)
-        await pilot.pause()
-        await pilot.hover(target)
-        await pilot.pause()
-
-        assert target.styles.background != base_backgrounds.pop()
-
-
-async def test_config_screen_default_button_inserts_key_as_new_line_with_comma(
-    monkeypatch, tmp_path: Path
-):
-    """FR-017: clicking a built-in default on an empty object adds `"key": `
-    as its own line, cursor landing right after the colon; clicking a second,
-    different default adds another line and commas the first one."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+    env_file = tmp_path / "settings.env"
 
     app = _ConfigApp()
     async with app.run_test(size=(100, 60)) as pilot:
         await pilot.pause()
         screen = app.screen
-        editor = screen.query_one("#editor", TextArea)
-        assert editor.text == "{}"
+        path_input = screen.query_one("#field-env_file", Input)
+        path_input.focus()
+        await pilot.press(*str(env_file))
+        await pilot.pause()
 
-        button = _default_button(screen, "target_version")
+        editor = screen.query_one("#editor", TextArea)
+        button = _default_button(screen, "OME_ZARR_TOOLS_CHUNKS_PER_SHARD")
         button.scroll_visible(animate=False)
         await pilot.pause()
         await pilot.click(button)
         await pilot.pause()
 
-        assert editor.text == '{\n  "target_version": \n}'
-        assert editor.cursor_location == (1, 20)  # right after `  "target_version": `
+        assert editor.text == "OME_ZARR_TOOLS_CHUNKS_PER_SHARD="  # not "...=None"
 
-        editor.insert('"0.5"')  # simulate the user typing a value
+
+async def test_config_screen_default_button_inserts_key_value_line(tmp_path: Path):
+    """Golden path: filling ENV_FILE and clicking a default-entry button
+    inserts a plain `KEY=VALUE` line (not JSON) into the editor."""
+    env_file = tmp_path / "settings.env"
+
+    app = _ConfigApp()
+    async with app.run_test(size=(100, 60)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        path_input = screen.query_one("#field-env_file", Input)
+        path_input.focus()
+        await pilot.press(*str(env_file))
         await pilot.pause()
 
-        second_key = next(
-            b.default_key
-            for b in screen._defaults_view.query(DefaultEntryButton)
-            if b.default_key != "target_version"
-        )
-        second_button = _default_button(screen, second_key)
-        second_button.scroll_visible(animate=False)
+        editor = screen.query_one("#editor", TextArea)
+        assert editor.text == ""
+
+        button = _default_button(screen, "OME_ZARR_TOOLS_TARGET_VERSION")
+        button.scroll_visible(animate=False)
         await pilot.pause()
-        await pilot.click(second_button)
+        await pilot.click(button)
         await pilot.pause()
 
-        assert editor.text == (f'{{\n  "target_version": "0.5",\n  "{second_key}": \n}}')
+        assert editor.text == "OME_ZARR_TOOLS_TARGET_VERSION=0.5"
 
 
-async def test_config_screen_default_button_places_cursor_in_existing_value(
-    monkeypatch, tmp_path: Path
-):
+async def test_config_screen_default_button_places_cursor_in_existing_value(tmp_path: Path):
     """Clicking a default that's already present in the editor leaves its
     current value untouched, just moving the cursor to its start -- rather
     than duplicating the key or erasing what's there."""
-    monkeypatch.setenv("HOME", str(tmp_path))
-
     app = _ConfigApp()
     async with app.run_test(size=(100, 60)) as pilot:
         await pilot.pause()
         screen = app.screen
         editor = screen.query_one("#editor", TextArea)
-        editor.text = '{\n  "target_version": "0.4"\n}'
+        editor.text = "OME_ZARR_TOOLS_TARGET_VERSION=0.4"
         await pilot.pause()
 
-        button = _default_button(screen, "target_version")
+        button = _default_button(screen, "OME_ZARR_TOOLS_TARGET_VERSION")
         button.scroll_visible(animate=False)
         await pilot.pause()
         await pilot.click(button)
         await pilot.pause()
 
-        assert editor.text == '{\n  "target_version": "0.4"\n}'  # untouched
-        assert editor.cursor_location == (1, 20)  # right at the start of "0.4"
+        assert editor.text == "OME_ZARR_TOOLS_TARGET_VERSION=0.4"  # untouched
+        assert editor.cursor_location == (0, 30)  # right at the start of "0.4"
 
 
-async def test_config_screen_save_reproduces_config_set_and_blocks_invalid_json(
-    monkeypatch, tmp_path: Path
-):
-    """T026: valid JSON save reproduces `config set`'s write, navigating to the Result
-    screen; invalid JSON blocks it -- no navigation, edit kept verbatim."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+async def test_config_screen_save_writes_file_and_shows_plain_text_result(tmp_path: Path):
+    """T022 golden path: Save writes the env-file to disk and navigates to
+    `ConfigResultScreen`, which shows the plain-text content."""
+    env_file = tmp_path / "settings.env"
 
     app = _ConfigApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         prep_screen = app.screen
-        editor = prep_screen.query_one("#editor", TextArea)
+        path_input = prep_screen.query_one("#field-env_file", Input)
+        path_input.focus()
+        await pilot.press(*str(env_file))
+        await pilot.pause()
 
-        editor.text = json.dumps({"compression": "zstd"}, indent=2)
+        editor = prep_screen.query_one("#editor", TextArea)
+        editor.text = "OME_ZARR_TOOLS_APPLY_MASK_THRESHOLD=0.7"
         await pilot.pause()
         await pilot.press("f5")
         await pilot.pause()
@@ -367,21 +314,33 @@ async def test_config_screen_save_reproduces_config_set_and_blocks_invalid_json(
         result_screen = app.screen
         await _wait_for(pilot, lambda: result_screen._finished)
 
-        target_path = target_config_path(True, None)
-        assert read_config(target_path) == {"compression": "zstd"}
+        assert read_env_file(env_file) == ({"OME_ZARR_TOOLS_APPLY_MASK_THRESHOLD": "0.7"}, [])
         assert "succeeded" in str(result_screen._outcome_label.content)
-        assert json.loads(result_screen.config_json) == {"compression": "zstd"}
+        assert result_screen.env_text == "OME_ZARR_TOOLS_APPLY_MASK_THRESHOLD=0.7\n"
 
-        await pilot.press("escape")  # Back to form
+
+async def test_config_screen_unrecognized_key_blocks_save(tmp_path: Path):
+    """T022 edge case: an unrecognized `OME_ZARR_TOOLS_*` key in the editor
+    blocks Save with an error notification; the file is never written and the
+    editor content is preserved verbatim."""
+    env_file = tmp_path / "settings.env"
+
+    app = _ConfigApp()
+    async with app.run_test() as pilot:
         await pilot.pause()
-        assert app.screen is prep_screen
+        prep_screen = app.screen
+        path_input = prep_screen.query_one("#field-env_file", Input)
+        path_input.focus()
+        await pilot.press(*str(env_file))
+        await pilot.pause()
 
-        editor.text = "{not valid json"
+        editor = prep_screen.query_one("#editor", TextArea)
+        editor.text = "OME_ZARR_TOOLS_TYPO_OPTION=1"
         await pilot.pause()
         await pilot.press("f5")
         await pilot.pause()
 
-        # Blocked: no navigation, file on disk unchanged, edit preserved verbatim.
+        # Blocked: no navigation, file never written, edit preserved verbatim.
         assert app.screen is prep_screen
-        assert read_config(target_path) == {"compression": "zstd"}
-        assert editor.text == "{not valid json"
+        assert not env_file.exists()
+        assert editor.text == "OME_ZARR_TOOLS_TYPO_OPTION=1"

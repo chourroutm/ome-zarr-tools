@@ -36,10 +36,10 @@ def test_path_field_gets_autocomplete_non_path_field_does_not():
     widget = build_field_widget(stack_dir_param)
     assert build_autocomplete(stack_dir_param, widget) is not None
 
-    # inspect.output_format is a click.Choice option -> no autocomplete
-    format_param = next(p for p in inspect.params if p.name == "output_format")
-    widget = build_field_widget(format_param)
-    assert build_autocomplete(format_param, widget) is None
+    # inspect.as_json is a flag (Checkbox), not a path -> no autocomplete
+    json_param = next(p for p in inspect.params if p.name == "as_json")
+    widget = build_field_widget(json_param)
+    assert build_autocomplete(json_param, widget) is None
 
 
 def test_multiple_option_with_no_explicit_default_shows_blank_not_sentinel():
@@ -49,7 +49,7 @@ def test_multiple_option_with_no_explicit_default_shows_blank_not_sentinel():
     like "Sentinel.UNSET"."""
     corner_param = next(p for p in extract.params if p.name == "corner")
     widget = build_field_widget(corner_param)
-    assert widget.value == ""
+    assert widget.inputs[0].value == ""
 
 
 def test_zarr_path_browse_picker_selects_directories_not_just_files():

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 
 from ome_zarr_tools.commands.apply_mask import apply_mask
@@ -14,12 +16,36 @@ from ome_zarr_tools.commands.inspect import inspect
 from ome_zarr_tools.commands.interactive import interactive
 from ome_zarr_tools.commands.migrate import migrate
 from ome_zarr_tools.commands.upsample import upsample
+from ome_zarr_tools.core.config_registry import build_default_map, unrecognized_keys
+from ome_zarr_tools.core.env_file import read_env_file
 
 
 @click.group()
 @click.version_option(package_name="ome-zarr-tools")
-def cli() -> None:
+@click.option(
+    "--env-file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help=(
+        "Env-var file (see `config`) supplying default option values for the "
+        "subcommand run. An explicitly passed flag always overrides it."
+    ),
+)
+@click.pass_context
+def cli(ctx: click.Context, env_file: str | None) -> None:
     """OME-Zarr Tools: work with OME-Zarr (OME-NGFF) multiscale datasets."""
+    ctx.ensure_object(dict)
+    if env_file is None:
+        return
+    values, dup_warnings = read_env_file(Path(env_file))
+    for warning in dup_warnings:
+        click.echo(f"Warning: {warning}", err=True)
+    names = unrecognized_keys(values)
+    for name in names:
+        click.echo(f"Warning: unrecognized key {name!r} in {env_file}.", err=True)
+    ctx.default_map = build_default_map(values)
+    ctx.obj["unrecognized"] = names
+    ctx.obj["env_file"] = env_file
 
 
 cli.add_command(from_images)

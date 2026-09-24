@@ -87,7 +87,9 @@ async def test_run_navigates_immediately_before_worker_resolves(monkeypatch, tmp
     monkeypatch.chdir(tmp_path)
     captured = {}
 
-    def fake_run_command(app, command, tokens, on_done, on_progress=None, on_log=None):  # noqa: ANN001
+    def fake_run_command(  # noqa: ANN001
+        app, command, tokens, on_done, on_progress=None, on_log=None, default_map=None
+    ):
         captured["on_done"] = on_done
 
     monkeypatch.setattr(tui_app_module, "run_command", fake_run_command)
@@ -265,7 +267,9 @@ async def test_second_run_while_pending_renavigates_instead_of_duplicating(monke
     monkeypatch.chdir(tmp_path)
     call_count = {"n": 0}
 
-    def fake_run_command(app, command, tokens, on_done, on_progress=None, on_log=None):  # noqa: ANN001
+    def fake_run_command(  # noqa: ANN001
+        app, command, tokens, on_done, on_progress=None, on_log=None, default_map=None
+    ):
         call_count["n"] += 1
 
     monkeypatch.setattr(tui_app_module, "run_command", fake_run_command)
@@ -375,13 +379,18 @@ async def test_migrate_result_screen_shows_applied_diff(legacy_v2_ome_zarr):
         assert len(result_screen.query("#diff-proposed")) == 1
 
 
-async def test_config_result_screen_shows_written_json(monkeypatch, tmp_path):
+async def test_config_result_screen_shows_written_env_text(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
+    env_file = tmp_path / "settings.env"
     app = _ScreenApp(lambda: ConfigScreen(COMMANDS["config"]))
     async with app.run_test() as pilot:
         await pilot.pause()
         screen = app.screen
-        screen._editor.text = '{"voxel_size_unit": "nanometer"}'
+        path_input = screen.query_one("#field-env_file", Input)
+        path_input.focus()
+        await pilot.press(*str(env_file))
+        await pilot.pause()
+        screen._editor.text = "OME_ZARR_TOOLS_FROM_IMAGES_VOXEL_SIZE_UNIT=nanometer"
         await pilot.pause()
         await pilot.press("f5")
         await pilot.pause()
@@ -389,7 +398,7 @@ async def test_config_result_screen_shows_written_json(monkeypatch, tmp_path):
         assert isinstance(app.screen, ConfigResultScreen)
         result_screen = app.screen
         await _wait_for(pilot, lambda: result_screen._finished)
-        assert "nanometer" in result_screen.config_json
+        assert "nanometer" in result_screen.env_text
 
 
 async def test_restore_defaults_reloads_screen_with_opening_values(monkeypatch, tmp_path):
@@ -448,7 +457,7 @@ async def test_restore_defaults_no_op_while_run_is_pending(monkeypatch, tmp_path
     monkeypatch.setattr(
         tui_app_module,
         "run_command",
-        lambda app, command, tokens, on_done, on_progress=None, on_log=None: None,
+        lambda app, command, tokens, on_done, on_progress=None, on_log=None, default_map=None: None,
     )
 
     app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["apply_mask"]))

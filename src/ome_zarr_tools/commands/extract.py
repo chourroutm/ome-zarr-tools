@@ -9,6 +9,7 @@ import imageio.v3 as iio
 import numpy as np
 import zarr
 
+from ome_zarr_tools.core.click_ext import TuiOption
 from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.core.zarr_path import ZarrPathParamType
 from ome_zarr_tools.io.ome_metadata import read_multiscales
@@ -21,6 +22,8 @@ from ome_zarr_tools.io.ome_metadata import read_multiscales
     nargs=3,
     type=int,
     multiple=True,
+    cls=TuiOption,
+    tui_max_occurrences=2,
     help=(
         "Corner coordinates (i, j, k). Can be specified once (start corner) with "
         "--size, or twice (start and end corners, in any order)."
@@ -30,9 +33,6 @@ from ome_zarr_tools.io.ome_metadata import read_multiscales
 @click.option("--center", nargs=3, type=int, default=None, help="Center coordinates (i, j, k).")
 @click.option("--halfsize", type=int, default=None, help="Half-size (in voxels) around the center.")
 @click.option(
-    "--mag", type=float, default=None, help="Magnification level (1=original, 2=downsampled once)."
-)
-@click.option(
     "--level",
     "--mip",
     "--dataset_path",
@@ -41,9 +41,6 @@ from ome_zarr_tools.io.ome_metadata import read_multiscales
     default=0,
     show_default=True,
     help="Index into the dataset's resolution levels (0=highest resolution).",
-)
-@click.option(
-    "--scale", type=float, default=None, help="Scaling factor (1=original, 0.5=downsampled once)."
 )
 @click.option("--output", type=click.Path(), default=None, help="Output file path.")
 @click.option(
@@ -59,9 +56,7 @@ def extract(
     size: tuple[int, int, int] | None,
     center: tuple[int, int, int] | None,
     halfsize: int | None,
-    mag: float | None,
     level: int,
-    scale: float | None,
     output: str | None,
     output_format: str,
 ) -> None:
@@ -72,11 +67,6 @@ def extract(
       extract data.zarr --corner 0 0 0 --corner 512 512 256
       extract data.zarr --center 256 256 128 --halfsize 128
     """
-    if mag and not scale:
-        scale = 1.0 / mag
-    elif scale and not mag:
-        mag = 1.0 / scale
-
     try:
         group = zarr.open_group(zarr_path, mode="r")
     except Exception as exc:

@@ -75,13 +75,6 @@ def _build_coarser_levels(
 @click.command(name="downsample")
 @click.argument("zarr_path", type=ZarrPathParamType(exists=True, file_okay=False))
 @click.option(
-    "--num_levels",
-    type=int,
-    default=1,
-    show_default=True,
-    help="Number of new, progressively coarser levels to add.",
-)
-@click.option(
     "--output",
     type=click.Path(),
     default=None,
@@ -90,6 +83,13 @@ def _build_coarser_levels(
         "ZARR_PATH in place; ZARR_PATH is left completely untouched. Must not "
         "already exist. Omit to downsample ZARR_PATH in place (default)."
     ),
+)
+@click.option(
+    "--num_levels",
+    type=int,
+    default=1,
+    show_default=True,
+    help="Number of new, progressively coarser levels to add.",
 )
 @click.option(
     "--label",
@@ -101,7 +101,7 @@ def _build_coarser_levels(
         "the default continuous-intensity downsampling would."
     ),
 )
-def downsample(zarr_path: str, num_levels: int, output: str | None, label: bool) -> None:
+def downsample(zarr_path: str, output: str | None, num_levels: int, label: bool) -> None:
     """Add coarser multiscale levels below ZARR_PATH's existing coarsest level."""
     if num_levels < 1:
         raise CliError("--num_levels must be at least 1.")

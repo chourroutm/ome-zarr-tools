@@ -142,7 +142,7 @@ async def test_copy_does_not_run_and_copy_and_exit_closes_the_app(monkeypatch, t
         form_screen = app.screen
         await pilot.press("f6")  # Copy
         await pilot.pause()
-        assert app._clipboard == "ome-zarr-tools config set --user <key=value ...>"
+        assert app._clipboard == "ome-zarr-tools config set  <KEY=VALUE ...>"
         assert any("Copied" in line for line in form_screen._log_lines)
         assert form_screen._log_lines == [
             line

@@ -81,12 +81,12 @@ def test_upsample_reorders_new_finest_level_to_datasets_zero(sample_mask_zarr):
     assert np.array_equal(group["1"][:], existing_level_1)
 
 
-def test_upsample_label_keeps_only_original_label_values(sample_mask_zarr):
+def test_upsample_smooth_keeps_only_original_label_values(sample_mask_zarr):
     group_before = zarr.open_group(str(sample_mask_zarr), mode="r")
     source_values = set(np.unique(group_before["0"][:]).tolist())
 
     runner = CliRunner()
-    result = runner.invoke(upsample, [str(sample_mask_zarr), "--label"])
+    result = runner.invoke(upsample, [str(sample_mask_zarr), "--smooth", "1.0"])
     assert result.exit_code == 0, result.output
 
     group = zarr.open_group(str(sample_mask_zarr), mode="r")
@@ -95,7 +95,7 @@ def test_upsample_label_keeps_only_original_label_values(sample_mask_zarr):
     assert new_values <= source_values
 
 
-def test_upsample_without_label_is_exact_nearest_neighbor_repeat(sample_mask_zarr):
+def test_upsample_without_smooth_is_exact_nearest_neighbor_repeat(sample_mask_zarr):
     group_before = zarr.open_group(str(sample_mask_zarr), mode="r")
     source = group_before["0"][:]
 

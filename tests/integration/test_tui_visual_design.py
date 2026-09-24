@@ -79,6 +79,42 @@ async def test_required_only_command_shows_only_required_frame():
         assert ("optional-frame" in frames) == has_optional
 
 
+async def test_corner_field_shows_two_rows_capped_by_tui_max_occurrences():
+    """``extract --corner`` declares ``cls=TuiOption, tui_max_occurrences=2`` (it
+    can be given once, for a start corner, or twice, for start+end corners) --
+    that command-declared cap, not a hardcoded widget constant, is what makes
+    both rows (placeholders ``--corner`` and ``--corner (bis)``) visible up
+    front, and is what stops a third row from ever appearing. Filling both
+    rows must produce two ``--corner`` tokens; leaving the second row blank
+    must produce only one."""
+    app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["extract"]))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+
+        row1 = screen.query_one("#field-corner-1", Input)
+        row2 = screen.query_one("#field-corner-2", Input)
+        assert row1.placeholder == "--corner"
+        assert row2.placeholder == "--corner (bis)"
+
+        row1.focus()
+        await pilot.press(*"0 0 0")
+        await pilot.pause()
+        invocation = screen._invocation_text()
+        assert invocation.count("--corner") == 1
+        assert "0 0 0" in invocation
+        assert not screen.query("#field-corner-3")
+
+        row2.focus()
+        await pilot.press(*"512 512 256")
+        await pilot.pause()
+        invocation = screen._invocation_text()
+        assert invocation.count("--corner") == 2
+        assert "0 0 0" in invocation
+        assert "512 512 256" in invocation
+        assert not screen.query("#field-corner-3")
+
+
 async def test_required_frame_subtitle_starts_correct_and_updates_live():
     app = _ScreenApp(lambda: CommandFormScreen(COMMANDS["from_images"]))
     async with app.run_test() as pilot:

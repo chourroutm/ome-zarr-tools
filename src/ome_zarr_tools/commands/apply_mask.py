@@ -35,11 +35,6 @@ from ome_zarr_tools.core.zarr_path import ZarrPathParamType, validate_output_pat
     help="Threshold to binarize the mask.",
 )
 @click.option(
-    "--temporary_upsample",
-    is_flag=True,
-    help="Reserved for CLI compatibility; mask resampling is always applied automatically.",
-)
-@click.option(
     "--output",
     type=click.Path(),
     default=None,
@@ -49,9 +44,7 @@ from ome_zarr_tools.core.zarr_path import ZarrPathParamType, validate_output_pat
         "exist. Omit to mask --volume in place (default)."
     ),
 )
-def apply_mask(
-    volume: str, mask: str, threshold: float, temporary_upsample: bool, output: str | None
-) -> None:
+def apply_mask(volume: str, mask: str, threshold: float, output: str | None) -> None:
     """Apply a binary mask to an OME-Zarr volume, resampled to match each resolution level."""
     volume_path = Path(volume)
     mask_path = Path(mask)

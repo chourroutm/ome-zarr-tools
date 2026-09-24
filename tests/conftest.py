@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import dask
 import dask.array as da
 import imageio.v3 as iio
 import numpy as np
@@ -9,6 +10,17 @@ import pytest
 import zarr
 
 from ome_zarr_tools.core.pyramid import write_new_pyramid
+
+dask.config.set(scheduler="synchronous")
+"""Run every dask computation in-process, single-threaded, for the whole test
+session. dask's default threaded scheduler spins up a new ThreadPoolExecutor
+per `.compute()`/`da.store()` call; under this environment's `ulimit -u 768`
+(max user processes/threads), enough of those accumulate across a full test
+run to exhaust the limit -- surfacing as `RuntimeError: can't start new
+thread` and, in one observed case, an abort that took down the parent shell.
+The synchronous scheduler never spawns a thread, eliminating the failure
+mode at its source; it has no effect on correctness (same computation,
+same result), only on execution strategy."""
 
 
 def _write_ome_zarr(

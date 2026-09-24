@@ -23,7 +23,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Checkbox, Footer, Header, Input, OptionList, Select
+from textual.widgets import Checkbox, Footer, Header, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
 from ome_zarr_tools.tui.execution import ExecutionResult, run_command
@@ -82,11 +82,25 @@ class CommandMenuScreen(Screen[None]):
     CommandMenuScreen > OptionList > .option-list--option {
         color: #d4af37;
     }
+    #unrecognized-keys-warning {
+        color: $warning;
+        padding: 0 1;
+    }
     """
 
-    def __init__(self, commands: dict[str, click.Command]) -> None:
+    def __init__(
+        self,
+        commands: dict[str, click.Command],
+        default_map: dict[str, dict[str, str]] | None = None,
+        unrecognized: list[str] | None = None,
+    ) -> None:
         super().__init__()
         self.commands = commands
+        # `is None` (not `or`): an empty-but-given container must keep its own
+        # identity, since `InteractiveTUIApp.reload_env_file()` mutates this
+        # same object in place to propagate a live env-file reload here.
+        self.default_map = {} if default_map is None else default_map
+        self.unrecognized = [] if unrecognized is None else unrecognized
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -97,19 +111,58 @@ class CommandMenuScreen(Screen[None]):
                 for name in sorted(self.commands)
             ]
         )
+        if self.unrecognized:
+            yield Static(self._warning_text(), id="unrecognized-keys-warning")
         yield Footer()
+
+    def _warning_text(self) -> str:
+        return f"Warning: unrecognized key(s) in env file: {', '.join(self.unrecognized)}"
+
+    async def refresh_unrecognized_warning(self) -> None:
+        """Re-render the below-menu warning row from the current (possibly
+        just-reloaded) ``self.unrecognized`` -- called after the config
+        editor writes to the same env-file this session is using. Async:
+        mounting/removing a widget (as opposed to always keeping it mounted
+        and toggling `.display`, which would break the "absent when there's
+        nothing to warn about, not present-but-empty" contract) must be
+        awaited for the DOM change to actually take effect."""
+        existing = self.query("#unrecognized-keys-warning")
+        if self.unrecognized:
+            if existing:
+                existing.first(Static).update(self._warning_text())
+            else:
+                await self.mount(
+                    Static(self._warning_text(), id="unrecognized-keys-warning"),
+                    before=self.query_one(Footer),
+                )
+        elif existing:
+            await existing.first().remove()
 
     def on_resize(self, event: events.Resize) -> None:
         self.query_one(Logo).set_visible_for_size(*event.size)
+
+    async def on_screen_resume(self) -> None:
+        """Every time this screen becomes active again (initial display, or
+        returning from any other screen), re-read the active `--env-file`.
+        Covers not just a save from this session's own config editor, but any
+        external edit made while a different screen was on top (e.g. `config
+        set` run in another terminal, or the file edited outside the TUI)."""
+        reload_env_file = getattr(self.app, "reload_env_file", None)
+        if reload_env_file is not None:
+            await reload_env_file()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         name = str(event.option.id)
         command = self.commands[name]
         screen_cls = _SPECIALIZED_SCREENS.get(name)
-        if screen_cls is not None:
+        if screen_cls is MigrateScreen:
+            # migrate's target_version/chunks_per_shard are registry-configurable
+            # (shared with from_images) -- pre-fill them from the env-file too.
+            self.app.push_screen(MigrateScreen(command, self.default_map.get(name)))
+        elif screen_cls is not None:
             self.app.push_screen(screen_cls(command))
         else:
-            self.app.push_screen(CommandFormScreen(command))
+            self.app.push_screen(CommandFormScreen(command, self.default_map.get(name)))
 
     def action_cancel(self) -> None:
         self.app.exit(result=None)
@@ -134,9 +187,10 @@ class CommandFormScreen(Screen[None]):
         + FIELD_GAP_CSS
     )
 
-    def __init__(self, command: click.Command) -> None:
+    def __init__(self, command: click.Command, default_map: dict[str, str] | None = None) -> None:
         super().__init__()
         self.command = command
+        self._default_map = default_map or {}
         self._field_specs: list[FieldSpec] = []
         self._required_frame: Vertical | None = None
         self._log_lines: list[str] = []
@@ -147,7 +201,10 @@ class CommandFormScreen(Screen[None]):
         yield Header()
         with VerticalScroll():
             yield build_identity_frame(self.command)
-            self._field_specs = [build_field_spec(param) for param in self.command.params]
+            self._field_specs = [
+                build_field_spec(param, self._default_map.get(param.name))
+                for param in self.command.params
+            ]
             for frame in build_field_frames(self._field_specs):
                 if frame.id == "required-frame":
                     self._required_frame = frame
@@ -224,6 +281,7 @@ class CommandFormScreen(Screen[None]):
             _on_done,
             on_progress=on_progress,
             on_log=on_log,
+            default_map=self._default_map,
         )
 
     def action_copy(self) -> None:
@@ -242,7 +300,7 @@ class CommandFormScreen(Screen[None]):
     async def action_restore_defaults(self) -> None:
         if self._pending_result is not None:
             return
-        await self.app.switch_screen(CommandFormScreen(self.command))
+        await self.app.switch_screen(CommandFormScreen(self.command, self._default_map))
 
     def action_back(self) -> None:
         self.app.pop_screen()
@@ -263,9 +321,52 @@ class InteractiveTUIApp(App[str | None]):
     additionally declare it themselves so it also resolves in isolation
     (e.g. under a test harness that doesn't wrap screens in this App)."""
 
-    def __init__(self, commands: dict[str, click.Command]) -> None:
+    def __init__(
+        self,
+        commands: dict[str, click.Command],
+        default_map: dict[str, dict[str, str]] | None = None,
+        unrecognized: list[str] | None = None,
+        env_file: str | None = None,
+    ) -> None:
         super().__init__()
         self.commands = commands
+        # `is None` (not `or`): keeps these the *same* dict/list objects
+        # `reload_env_file()` mutates in place, and that `CommandMenuScreen`
+        # (constructed from them below) ends up sharing identity with --
+        # reassigning to a brand-new empty container here would silently
+        # decouple the two the moment either started out empty.
+        self.default_map = {} if default_map is None else default_map
+        self.unrecognized = [] if unrecognized is None else unrecognized
+        self.env_file = env_file
 
     def on_mount(self) -> None:
-        self.push_screen(CommandMenuScreen(self.commands))
+        self.push_screen(CommandMenuScreen(self.commands, self.default_map, self.unrecognized))
+
+    async def reload_env_file(self) -> None:
+        """Re-read ``self.env_file`` from disk and refresh the cached
+        ``default_map``/``unrecognized`` used to pre-fill fields and the
+        menu's warning row -- called after the config editor writes to this
+        same file, so a change made mid-session is reflected immediately
+        instead of only after restarting the whole ``--tui`` session."""
+        if not self.env_file:
+            return
+
+        from pathlib import Path
+
+        from ome_zarr_tools.core.config_registry import build_default_map, unrecognized_keys
+        from ome_zarr_tools.core.env_file import read_env_file
+        from ome_zarr_tools.core.errors import CliError
+
+        try:
+            values, _dup_warnings = read_env_file(Path(self.env_file))
+        except CliError:
+            values = {}
+
+        self.default_map.clear()
+        self.default_map.update(build_default_map(values))
+        self.unrecognized[:] = unrecognized_keys(values)
+
+        for screen in self.screen_stack:
+            if isinstance(screen, CommandMenuScreen):
+                await screen.refresh_unrecognized_warning()
+                break

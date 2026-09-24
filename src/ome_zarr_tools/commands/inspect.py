@@ -96,17 +96,15 @@ def format_bytes(value: int | None) -> str:
 @click.command(name="inspect")
 @click.argument("zarr_path", type=ZarrPathParamType(exists=True, file_okay=False))
 @click.option(
-    "--format",
-    "output_format",
-    type=click.Choice(["text", "json"]),
-    default="text",
-    show_default=True,
-    help="Output format.",
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Output as JSON instead of text.",
 )
-def inspect(zarr_path: str, output_format: str) -> None:
+def inspect(zarr_path: str, as_json: bool) -> None:
     """Report shape, chunk/shard layout, and on-disk vs. logical size for ZARR_PATH. Read-only."""
     report = build_report(zarr_path)
-    if output_format == "json":
+    if as_json:
         click.echo(json.dumps(report, indent=2))
     else:
         click.echo(format_text(report))

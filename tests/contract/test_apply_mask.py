@@ -15,3 +15,21 @@ def test_threshold_default_is_half(sample_ome_zarr, sample_mask_zarr):
         apply_mask, ["--volume", str(sample_ome_zarr), "--mask", str(sample_mask_zarr)]
     )
     assert result.exit_code == 0, result.output
+
+
+def test_temporary_upsample_option_removed(sample_ome_zarr, sample_mask_zarr):
+    """FR-013: --temporary_upsample was dead code (mask resampling always
+    happens automatically) and has been removed entirely."""
+    runner = CliRunner()
+    result = runner.invoke(
+        apply_mask,
+        [
+            "--volume",
+            str(sample_ome_zarr),
+            "--mask",
+            str(sample_mask_zarr),
+            "--temporary_upsample",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "no such option" in result.output.lower()

@@ -166,8 +166,9 @@ class FixMetadataScreen(_BaseMetadataScreen):
 
 
 class MigrateScreen(_BaseMetadataScreen):
-    def __init__(self, command: click.Command) -> None:
+    def __init__(self, command: click.Command, default_map: dict[str, str] | None = None) -> None:
         super().__init__(command)
+        self._default_map = default_map or {}
         self._target_input: Input | None = None
         self._shard_input: Input | None = None
         self._output_field: PathField | None = None
@@ -187,7 +188,9 @@ class MigrateScreen(_BaseMetadataScreen):
             path_spec = build_field_spec(zarr_path_param)
             assert isinstance(path_spec.widget, PathField)
             self._path_field = path_spec.widget
-            target_spec = build_field_spec(target_version_param)
+            target_spec = build_field_spec(
+                target_version_param, self._default_map.get("target_version")
+            )
             assert isinstance(target_spec.widget, Input)
             self._target_input = target_spec.widget
             # --target_version has a CLI default (so click itself never requires it), but
@@ -195,7 +198,9 @@ class MigrateScreen(_BaseMetadataScreen):
             # Required frame keeps the two path/version fields the user reviews together
             # visually consistent, rather than tucking a pre-filled field into Optional.
             target_spec.required = True
-            shard_spec = build_field_spec(chunks_per_shard_param)
+            shard_spec = build_field_spec(
+                chunks_per_shard_param, self._default_map.get("chunks_per_shard")
+            )
             assert isinstance(shard_spec.widget, Input)
             self._shard_input = shard_spec.widget
             output_spec = build_field_spec(output_param)
@@ -293,7 +298,7 @@ class MigrateScreen(_BaseMetadataScreen):
         )
 
     async def action_restore_defaults(self) -> None:
-        await self.app.switch_screen(MigrateScreen(self.command))
+        await self.app.switch_screen(MigrateScreen(self.command, self._default_map))
 
 
 class _BaseConfirmScreen(Screen[None]):

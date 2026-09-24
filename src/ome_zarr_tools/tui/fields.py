@@ -103,8 +103,73 @@ def _path_only(param: click.Parameter) -> Literal["dir", "file", "any"]:
     return "any"
 
 
-def build_field_widget(param: click.Parameter) -> Checkbox | Select | Input:
-    """Return the Textual widget for one ``click.Parameter``, per the widget mapping table."""
+class MultiGroupField(Vertical):
+    """A ``multiple=True`` option whose ``nargs`` groups more than one value
+    together (currently only ``extract``'s ``--corner``): rendered as stacked
+    Input rows instead of one freeform box, since typing a second group of
+    numbers to add a second occurrence isn't discoverable otherwise.
+
+    ``max_occurrences`` (from the option's own ``TuiOption(tui_max_occurrences=...)``
+    declaration, see ``core/click_ext.py``) renders that many rows up front,
+    all visible immediately -- e.g. ``--corner``'s 2 (a start corner, optionally
+    an end corner). Left unset, it starts with a single row and grows a new
+    blank one below whenever the last is filled, so an option with no known
+    upper bound still works, just without every row visible at once."""
+
+    DEFAULT_CSS = """
+    MultiGroupField {
+        height: auto;
+    }
+    MultiGroupField > Input {
+        margin-bottom: 1;
+    }
+    MultiGroupField > Input:last-of-type {
+        margin-bottom: 0;
+    }
+    """
+
+    def __init__(
+        self,
+        param: click.Option,
+        *,
+        id: str | None = None,  # noqa: A002
+        max_occurrences: int | None = None,
+    ) -> None:
+        super().__init__(id=id)
+        self._flag = param.opts[0]
+        self._max_occurrences = max_occurrences
+        initial_rows = max_occurrences if max_occurrences is not None else 1
+        self.inputs: list[Input] = [self._make_row(i) for i in range(initial_rows)]
+
+    def _make_row(self, index: int) -> Input:
+        placeholder = self._flag if index == 0 else f"{self._flag} (bis)"
+        return Input(placeholder=placeholder, id=f"{self.id}-{index + 1}")
+
+    def compose(self) -> ComposeResult:
+        yield from self.inputs
+
+    async def on_input_changed(self, event: Input.Changed) -> None:
+        if self._max_occurrences is not None and len(self.inputs) >= self._max_occurrences:
+            return
+        if event.input is self.inputs[-1] and event.input.value.strip():
+            new_row = self._make_row(len(self.inputs))
+            self.inputs.append(new_row)
+            await self.mount(new_row)
+
+
+def build_field_widget(
+    param: click.Parameter, override: str | None = None
+) -> Checkbox | Select | Input | MultiGroupField:
+    """Return the Textual widget for one ``click.Parameter``, per the widget mapping table.
+
+    ``override`` (US2), when given, is a raw string value -- typically from a
+    top-level ``--env-file``'s parsed mapping -- shown as the field's starting
+    value instead of the option's own built-in default, so a configured
+    default is actually visible/applied even if the user never touches the
+    field. Converted through the option's own ``ParamType`` where the widget
+    needs a real typed value (``Checkbox``), left as a raw string where the
+    widget already works in strings (``Input``, whose value is text anyway).
+    """
     field_id = f"field-{param.name}"
 
     if isinstance(param, click.Argument):
@@ -113,30 +178,44 @@ def build_field_widget(param: click.Parameter) -> Checkbox | Select | Input:
     assert isinstance(param, click.Option)
 
     if param.is_flag:
-        return Checkbox(param.opts[0], value=bool(param.default), id=field_id)
+        value = param.type.convert(override, param, None) if override is not None else param.default
+        return Checkbox(param.opts[0], value=bool(value), id=field_id)
 
     if isinstance(param.type, click.Choice):
+        choice_default = (
+            override
+            if override is not None and override in param.type.choices
+            else (param.default if param.default in param.type.choices else None)
+        )
         options = [(choice, choice) for choice in param.type.choices]
-        default = param.default if param.default in param.type.choices else None
-        return Select(options, value=default, id=field_id, allow_blank=default is None)
+        return Select(
+            options, value=choice_default, id=field_id, allow_blank=choice_default is None
+        )
 
-    default = None if param.required else param.default
-    if param.multiple and not isinstance(default, tuple):
-        # `multiple=True` options with no explicit `default=` resolve to an
-        # internal Click "unset" sentinel here, not `()` -- the runtime value is
-        # always a tuple (empty if unset), so treat any non-tuple as empty too.
-        default = ()
-    if default in (None, ()):
-        default_str = ""
-    elif isinstance(default, (list, tuple)):
-        default_str = " ".join(str(d) for d in default)
+    if param.multiple and (param.nargs or 1) > 1:
+        max_occurrences = getattr(param, "tui_max_occurrences", None)
+        return MultiGroupField(param, id=field_id, max_occurrences=max_occurrences)
+
+    if override is not None:
+        default_str = override
     else:
-        default_str = str(default)
+        default = None if param.required else param.default
+        if param.multiple and not isinstance(default, tuple):
+            # `multiple=True` options with no explicit `default=` resolve to an
+            # internal Click "unset" sentinel here, not `()` -- the runtime value is
+            # always a tuple (empty if unset), so treat any non-tuple as empty too.
+            default = ()
+        if default in (None, ()):
+            default_str = ""
+        elif isinstance(default, (list, tuple)):
+            default_str = " ".join(str(d) for d in default)
+        else:
+            default_str = str(default)
     return Input(value=default_str, placeholder=param.opts[0], id=field_id)
 
 
 def build_autocomplete(
-    param: click.Parameter, widget: Checkbox | Select | Input
+    param: click.Parameter, widget: Checkbox | Select | Input | MultiGroupField
 ) -> SafePathAutoComplete | None:
     """Return a `PathAutoComplete` attached to `widget`, or None if `param` isn't a path field.
 
@@ -280,12 +359,12 @@ class PathField(Horizontal):
 AnyFieldWidget = Checkbox | Select | Input | PathField | Vertical
 
 
-def build_field_spec(param: click.Parameter) -> FieldSpec:
+def build_field_spec(param: click.Parameter, override: str | None = None) -> FieldSpec:
     """Build the complete `FieldSpec` for one `click.Parameter`, including Browse/add-on
-    wrapping for path fields."""
+    wrapping for path fields. ``override``: see ``build_field_widget``."""
     label = field_label(param)
     required = is_required(param)
-    widget = build_field_widget(param)
+    widget = build_field_widget(param, override)
     autocomplete = build_autocomplete(param, widget)
 
     if is_path_param(param):
@@ -320,6 +399,15 @@ def widget_value_to_tokens(param: click.Parameter, widget: AnyFieldWidget) -> li
         if select_value is Select.BLANK or select_value in (None, ""):
             return []
         return [flag, str(select_value)]
+
+    if isinstance(widget, MultiGroupField):
+        group_tokens: list[str] = []
+        for row in widget.inputs:
+            row_value = row.value.strip()
+            if row_value:
+                group_tokens.append(flag)
+                group_tokens.extend(row_value.split())
+        return group_tokens
 
     assert isinstance(widget, (Input, PathField))
     raw = widget.value.strip()
@@ -359,6 +447,8 @@ def _field_is_empty(widget: AnyFieldWidget) -> bool:
         return widget.value is Select.BLANK or widget.value in (None, "")
     if isinstance(widget, Checkbox):
         return False  # a boolean flag is never "empty"
+    if isinstance(widget, MultiGroupField):
+        return not any(row.value.strip() for row in widget.inputs)
     return False
 
 

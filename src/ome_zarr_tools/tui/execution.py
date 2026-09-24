@@ -126,12 +126,21 @@ def run_command(
     on_done: OnDone,
     on_progress: Callable[[int, int], None] | None = None,
     on_log: Callable[[str], None] | None = None,
+    default_map: dict[str, str] | None = None,
 ) -> None:
-    """Run ``command`` with ``tokens`` in a worker thread; call ``on_done`` on the UI thread."""
+    """Run ``command`` with ``tokens`` in a worker thread; call ``on_done`` on the UI thread.
+
+    ``default_map``, when given, is the top-level ``--env-file``'s parsed
+    values scoped to this command (US2) -- an explicit token in ``tokens``
+    still wins, per click's own ``default_map`` precedence.
+    """
     run_in_background(
         app,
         lambda: command.main(
-            args=tokens, prog_name=f"ome-zarr-tools {command.name}", standalone_mode=False
+            args=tokens,
+            prog_name=f"ome-zarr-tools {command.name}",
+            standalone_mode=False,
+            default_map=default_map,
         ),
         on_done,
         on_progress=on_progress,

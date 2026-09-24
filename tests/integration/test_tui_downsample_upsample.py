@@ -89,7 +89,7 @@ async def test_upsample_appears_in_menu_and_uses_generic_form():
         path_field = next(s.widget for s in screen._field_specs if isinstance(s.widget, PathField))
         assert path_field.input.id == "field-zarr_path"
         assert screen.query_one("#field-num_levels", Input).value == "1"
-        assert screen.query_one("#field-label", Checkbox).value is False
+        assert screen.query_one("#field-smooth", Input).value == ""
         assert screen.query_one("#field-output", Input).value == ""
 
 

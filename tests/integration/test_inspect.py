@@ -20,7 +20,7 @@ def test_inspect_reports_correct_shapes_and_is_read_only(sample_ome_zarr):
     before_checksum = _checksum_dir(sample_ome_zarr)
 
     runner = CliRunner()
-    result = runner.invoke(inspect, [str(sample_ome_zarr), "--format", "json"])
+    result = runner.invoke(inspect, [str(sample_ome_zarr), "--json"])
     assert result.exit_code == 0, result.output
 
     report = json.loads(result.output)
@@ -47,7 +47,7 @@ def test_inspect_text_output_lists_levels(sample_ome_zarr):
 
 def test_inspect_reports_ome_ngff_and_zarr_version_when_metadata_valid(sample_ome_zarr):
     runner = CliRunner()
-    result = runner.invoke(inspect, [str(sample_ome_zarr), "--format", "json"])
+    result = runner.invoke(inspect, [str(sample_ome_zarr), "--json"])
     assert result.exit_code == 0, result.output
     report = json.loads(result.output)
     assert report["metadata_valid"] is True
@@ -70,7 +70,7 @@ def test_inspect_omits_ome_ngff_and_zarr_version_when_metadata_invalid(sample_om
     group.attrs.put(attrs)
 
     runner = CliRunner()
-    result = runner.invoke(inspect, [str(sample_ome_zarr), "--format", "json"])
+    result = runner.invoke(inspect, [str(sample_ome_zarr), "--json"])
     assert result.exit_code == 0, result.output
     report = json.loads(result.output)
     assert report["metadata_valid"] is False
@@ -104,7 +104,7 @@ def test_inspect_degrades_gracefully_when_stored_bytes_is_unavailable(monkeypatc
     monkeypatch.setattr(zarr.Array, "nbytes_stored", _raise_permission_error)
 
     runner = CliRunner()
-    result = runner.invoke(inspect, [str(sample_ome_zarr), "--format", "json"])
+    result = runner.invoke(inspect, [str(sample_ome_zarr), "--json"])
     assert result.exit_code == 0, result.output
     report = json.loads(result.output)
     assert report["total_stored_bytes"] is None

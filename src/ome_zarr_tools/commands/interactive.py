@@ -14,17 +14,25 @@ import click
 from ome_zarr_tools.core.errors import CliError
 
 
-def _prompt_tokens(param: click.Parameter) -> list[str]:
-    """Return the CLI tokens (e.g. ``["--threshold", "0.5"]``) for one parameter's answer."""
+def _prompt_tokens(param: click.Parameter, default_map: dict[str, str] | None = None) -> list[str]:
+    """Return the CLI tokens (e.g. ``["--threshold", "0.5"]``) for one parameter's answer.
+
+    ``default_map`` (US2), when it has an entry for this param, is shown/accepted
+    as the prompt's own default instead of the option's built-in one -- so
+    accepting a blank answer applies the env-file's value, the same as omitting
+    the flag entirely on a direct CLI run would.
+    """
     if isinstance(param, click.Argument):
         value = click.prompt(param.human_readable_name)
         return [str(value)]
 
     assert isinstance(param, click.Option)
     flag = param.opts[0]
+    override = (default_map or {}).get(param.name) if param.name else None
 
     if param.is_flag:
-        if click.confirm(f"{flag}?", default=bool(param.default)):
+        shown_default = param.default if override is None else override
+        if click.confirm(f"{flag}?", default=bool(shown_default)):
             return [flag]
         return []
 
@@ -49,17 +57,22 @@ def _prompt_tokens(param: click.Parameter) -> list[str]:
         value = click.prompt(flag)
         return [flag, str(value)]
 
-    default = param.default
+    default = param.default if override is None else override
     default_str = "" if default is None else str(default)
     raw = click.prompt(flag, default=default_str, show_default=bool(default_str))
     return [flag, raw] if raw != "" else []
 
 
-def _confirm_and_run(command: click.Command, tokens: list[str]) -> None:
+def _confirm_and_run(
+    command: click.Command, tokens: list[str], default_map: dict[str, str] | None = None
+) -> None:
     """Show the equivalent direct-CLI invocation, confirm, then run it.
 
     Shared by the prompt-based wizard and the Textual TUI (``interactive --tui``)
     so both give the identical no-side-effects-before-confirmation guarantee.
+    ``default_map``, when given, is the top-level ``--env-file``'s parsed
+    values scoped to this command (US2) -- an explicit token in ``tokens``
+    still wins, per click's own ``default_map`` precedence.
     """
     invocation = f"ome-zarr-tools {command.name} {' '.join(tokens)}".strip()
     click.echo(f"\nEquivalent command:\n  {invocation}")
@@ -68,19 +81,24 @@ def _confirm_and_run(command: click.Command, tokens: list[str]) -> None:
         click.echo("Cancelled. No changes were made.")
         return
 
-    command.main(args=tokens, prog_name=f"ome-zarr-tools {command.name}", standalone_mode=False)
+    command.main(
+        args=tokens,
+        prog_name=f"ome-zarr-tools {command.name}",
+        standalone_mode=False,
+        default_map=default_map,
+    )
 
 
-def _run_wizard(command: click.Command) -> None:
+def _run_wizard(command: click.Command, default_map: dict[str, str] | None = None) -> None:
     click.echo(f"\n--- {command.name} ---")
     if command.help:
         click.echo(command.help.strip().splitlines()[0])
 
     tokens: list[str] = []
     for param in command.params:
-        tokens.extend(_prompt_tokens(param))
+        tokens.extend(_prompt_tokens(param, default_map))
 
-    _confirm_and_run(command, tokens)
+    _confirm_and_run(command, tokens, default_map)
 
 
 def _sibling_commands(ctx: click.Context) -> dict[str, click.Command]:
@@ -93,8 +111,11 @@ def _sibling_commands(ctx: click.Context) -> dict[str, click.Command]:
     }
 
 
-def _run_prompt_menu(choices: dict[str, click.Command]) -> None:
+def _run_prompt_menu(
+    choices: dict[str, click.Command], mapping: dict[str, dict[str, str]] | None = None
+) -> None:
     names = sorted(choices)
+    mapping = mapping or {}
 
     click.echo("Available commands:")
     for i, name in enumerate(names, start=1):
@@ -106,10 +127,15 @@ def _run_prompt_menu(choices: dict[str, click.Command]) -> None:
         show_choices=False,
     )
     selected_name = names[int(selection) - 1] if selection.isdigit() else selection
-    _run_wizard(choices[selected_name])
+    _run_wizard(choices[selected_name], mapping.get(selected_name))
 
 
-def _run_tui(choices: dict[str, click.Command]) -> None:
+def _run_tui(
+    choices: dict[str, click.Command],
+    mapping: dict[str, dict[str, str]] | None = None,
+    unrecognized: list[str] | None = None,
+    env_file: str | None = None,
+) -> None:
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise CliError(
             "--tui requires an interactive terminal (stdin/stdout must be a tty); "
@@ -118,7 +144,9 @@ def _run_tui(choices: dict[str, click.Command]) -> None:
 
     from ome_zarr_tools.tui.app import InteractiveTUIApp
 
-    app = InteractiveTUIApp(choices)
+    app = InteractiveTUIApp(
+        choices, default_map=mapping, unrecognized=unrecognized, env_file=env_file
+    )
     invocation = app.run()
     if invocation:
         # Reliable fallback for "Copy & exit": the clipboard-copy attempt
@@ -140,7 +168,13 @@ def _run_tui(choices: dict[str, click.Command]) -> None:
 def interactive(ctx: click.Context, use_tui: bool) -> None:
     """Choose a command from a menu, then answer prompts to run it."""
     choices = _sibling_commands(ctx)
+    # `ctx.parent` is the top-level group's own context -- its `default_map` is
+    # the full mapping set by `--env-file` (T012), unsliced (per-command
+    # slicing only happens for a *directly* dispatched subcommand's own ctx).
+    mapping: dict[str, dict[str, str]] = (ctx.parent.default_map or {}) if ctx.parent else {}  # type: ignore[assignment]
+    unrecognized: list[str] = (ctx.obj or {}).get("unrecognized", []) if ctx.obj else []
+    env_file: str | None = (ctx.obj or {}).get("env_file") if ctx.obj else None
     if use_tui:
-        _run_tui(choices)
+        _run_tui(choices, mapping, unrecognized, env_file)
     else:
-        _run_prompt_menu(choices)
+        _run_prompt_menu(choices, mapping)

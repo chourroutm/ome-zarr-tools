@@ -11,7 +11,7 @@ def test_interactive_runs_from_images(tmp_path, image_stack_dir):
     # Menu selection "6" = from_images (alphabetical position among all registered
     # commands: apply_mask, config, downsample, extract, fix_metadata, from_images, ...).
     # Prompts in declaration order: --stack_dir, --stack_pattern, --vol_file,
-    # --voxel_size (multiple; blank line to stop), --voxel_size_unit, --num_downsampling,
+    # --voxel_size (multiple; blank line to stop), --voxel_size_unit, --num_levels,
     # --chunk_size, --target_version, --shard_size, OUTPUT_ZARR argument, then the
     # final "Run this now?" confirm.
     answers = "\n".join(
@@ -23,7 +23,7 @@ def test_interactive_runs_from_images(tmp_path, image_stack_dir):
             "1.0",  # --voxel_size value 1
             "",  # stop repeating --voxel_size
             "",  # --voxel_size_unit (accept default)
-            "",  # --num_downsampling (accept default)
+            "",  # --num_levels (accept default)
             "",  # --chunk_size (accept default)
             "",  # --target_version (accept default)
             "",  # --shard_size (skip)
@@ -94,6 +94,41 @@ def test_interactive_cancel_leaves_no_side_effects(tmp_path, image_stack_dir):
     assert result.exit_code == 0, result.output
     assert "Cancelled" in result.output
     assert not out.exists()
+
+
+def test_wizard_uses_env_file_default_without_being_typed(tmp_path, image_stack_dir):
+    """US2/T014: with a `--env-file`-derived mapping, the plain wizard's
+    `_confirm_and_run` invokes the target command with that mapping as
+    `default_map`; accepting the prompt's own blank-default answer for
+    `--chunk_size` still lets the env-file's value flow through to the
+    actual command run (never typed at the prompt itself)."""
+    env_file = tmp_path / "settings.env"
+    env_file.write_text("OME_ZARR_TOOLS_FROM_IMAGES_CHUNK_SIZE=8\n", encoding="utf-8")
+    out = tmp_path / "out.zarr"
+    runner = CliRunner()
+    answers = "\n".join(
+        [
+            "6",  # select from_images
+            str(image_stack_dir),  # --stack_dir
+            "",  # --stack_pattern (skip)
+            "",  # --vol_file (skip)
+            "1.0",  # --voxel_size value 1
+            "",  # stop repeating --voxel_size
+            "",  # --voxel_size_unit (accept default)
+            "",  # --num_levels (accept default)
+            "",  # --chunk_size (accept default -- but env-file's 8 should apply)
+            "",  # --target_version (accept default)
+            "",  # --chunks_per_shard (skip)
+            str(out),  # OUTPUT_ZARR argument
+            "y",  # Run this now?
+            "",
+        ]
+    )
+    result = runner.invoke(cli, ["--env-file", str(env_file), "interactive"], input=answers)
+    assert result.exit_code == 0, result.output
+
+    group = zarr.open_group(str(out), mode="r")
+    assert group["0"].chunks == (8, 8, 8)
 
 
 def test_tui_copy_and_exit_fallback_prints_invocation(monkeypatch, capsys):
