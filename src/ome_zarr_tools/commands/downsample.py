@@ -57,7 +57,10 @@ def _build_coarser_levels(
     new_levels = []
     data = da.from_array(coarsest_array, chunks=coarsest_array.chunks)
     for i, path in enumerate(new_paths):
-        data = downsample(data, downsample_func=downsample_func)
+        # Rechunk back to the stored chunk shape first: each downsample halves
+        # the dask chunks, which would otherwise shrink below the Gaussian
+        # halo depth after a few levels.
+        data = downsample(data.rechunk(coarsest_array.chunks), downsample_func=downsample_func)
         chunk_shape = tuple(
             min(chunk, size) for chunk, size in zip(coarsest_array.chunks, data.shape, strict=True)
         )
