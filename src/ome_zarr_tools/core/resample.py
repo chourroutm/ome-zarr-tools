@@ -300,3 +300,47 @@ def label_downsample(
         dtype=data.dtype,
         allow_rechunk=False,
     )
+
+
+def label_smooth(data: da.Array, sigma: float) -> da.Array:
+    """Soften ``data``'s label boundaries without changing its shape, lazily:
+    the same per-block channel decomposition as ``label_downsample`` (one
+    Gaussian-smoothed probability channel per label present in the block
+    plus its halo, re-snapped to the highest-probability label), minus the
+    decimation. Never invents a value, and matches smoothing the whole array
+    at once exactly: a label absent from a block's halo has zero probability
+    on that block's interior, so it could never have won there anyway.
+    """
+    depth = _gaussian_depth(sigma)
+    data = _merge_undersized_trailing_chunk(data, depth)
+    axis_depth = _per_axis_depth(data.chunks, depth)
+
+    def _smooth_block_with_halo(padded_block: npt.NDArray) -> npt.NDArray:
+        crop = tuple(
+            slice(axis_depth[axis], -axis_depth[axis]) if axis_depth[axis] > 0 else slice(None)
+            for axis in range(padded_block.ndim)
+        )
+        labels = np.unique(padded_block)
+        channels = np.stack(
+            [
+                scipy.ndimage.gaussian_filter(
+                    (padded_block == label).astype(np.float64),
+                    sigma=sigma,
+                    mode="reflect",
+                    truncate=4.0,
+                )[crop]
+                for label in labels
+            ]
+        )
+        return labels[np.argmax(channels, axis=0)].astype(padded_block.dtype)
+
+    return da.map_overlap(
+        _smooth_block_with_halo,
+        data,
+        depth=axis_depth,
+        boundary="reflect",
+        trim=False,
+        chunks=data.chunks,
+        dtype=data.dtype,
+        allow_rechunk=False,
+    )
