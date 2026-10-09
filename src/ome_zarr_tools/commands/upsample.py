@@ -58,17 +58,31 @@ def _build_new_finer_levels(
 
     new_paths = next_new_paths(existing_datasets, num_levels, group=group)
     new_levels: list[NewLevel] = []
-    source_array: da.Array = da.from_array(finest_array, chunks=finest_array.chunks)
-    source_scale = list(finest_scale)
+    # New levels keep the finest level's chunk and shard shapes (shards None
+    # for unsharded or Zarr v2) -- every new level is larger, so both always
+    # fit. Dask works in one block per shard (or chunk), as in downsample.
     source_chunks = finest_array.chunks
+    source_shards = finest_array.shards
+    work_blocks = source_shards if source_shards is not None else source_chunks
+    source_array: da.Array = da.from_array(finest_array, chunks=work_blocks)
+    source_scale = list(finest_scale)
     for path in new_paths:
         upsampled = nearest_upsample(source_array)
         if smooth is not None:
             smoothed_np = _smooth_labels(upsampled.compute(), smooth)
-            upsampled = da.from_array(smoothed_np, chunks=source_chunks)
+            upsampled = da.from_array(smoothed_np, chunks=work_blocks)
+        # nearest_upsample doubles the dask blocks; rechunk so they don't
+        # keep growing level after level.
+        upsampled = upsampled.rechunk(work_blocks)
         new_scale = [s / 2 for s in source_scale]
         new_levels.append(
-            NewLevel(path=path, array=upsampled, chunks=source_chunks, scale=new_scale)
+            NewLevel(
+                path=path,
+                array=upsampled,
+                chunks=source_chunks,
+                scale=new_scale,
+                shards=source_shards,
+            )
         )
         source_array = upsampled
         source_scale = new_scale

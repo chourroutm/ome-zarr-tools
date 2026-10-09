@@ -1,8 +1,10 @@
+import dask.array as da
 import numpy as np
 import zarr
 from click.testing import CliRunner
 
 from ome_zarr_tools.commands.upsample import upsample
+from ome_zarr_tools.core.pyramid import write_new_pyramid
 
 
 def _level_paths(group) -> list[str]:
@@ -119,3 +121,41 @@ def test_upsample_output_rejects_existing_path(tmp_path, sample_mask_zarr):
     result = runner.invoke(upsample, [str(sample_mask_zarr), "--output", str(output)])
     assert result.exit_code != 0
     assert "already exists" in result.output
+
+
+def _write_v3_dataset(path, data, shard_shape):
+    write_new_pyramid(
+        path,
+        da.from_array(data),
+        num_downsampling=0,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=["micrometer"] * 3,
+        voxel_size=[1.0, 1.0, 1.0],
+        chunk_shape=(8, 8, 8),
+        shard_shape=shard_shape,
+        zarr_format=3,
+        image_name="Image",
+    )
+
+
+def test_upsample_keeps_the_source_sharding_and_matches_unsharded_output(tmp_path):
+    data = (np.random.default_rng(6).random((16, 20, 20)) > 0.5).astype("uint8")
+    sharded, unsharded = tmp_path / "sharded.zarr", tmp_path / "unsharded.zarr"
+    _write_v3_dataset(sharded, data, (16, 16, 16))
+    _write_v3_dataset(unsharded, data, None)
+
+    runner = CliRunner()
+    for path in (sharded, unsharded):
+        result = runner.invoke(upsample, [str(path), "--num_levels", "2"])
+        assert result.exit_code == 0, result.output
+
+    sharded_group = zarr.open_group(str(sharded), mode="r")
+    unsharded_group = zarr.open_group(str(unsharded), mode="r")
+    new_paths = [d["path"] for d in sharded_group.attrs["ome"]["multiscales"][0]["datasets"][:2]]
+    for path in new_paths:
+        assert sharded_group[path].shards == (16, 16, 16)
+        assert sharded_group[path].chunks == (8, 8, 8)
+        assert unsharded_group[path].shards is None
+        np.testing.assert_array_equal(sharded_group[path][:], unsharded_group[path][:])
+    assert sharded_group[new_paths[0]].shape == (64, 80, 80)
