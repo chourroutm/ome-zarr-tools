@@ -55,14 +55,29 @@ def _build_coarser_levels(
 
     new_paths = next_new_paths(existing_datasets, num_levels, group=group)
     new_levels = []
-    data = da.from_array(coarsest_array, chunks=coarsest_array.chunks)
+    # New levels keep the coarsest level's sharding (None for unsharded or
+    # Zarr v2), and dask works in one block per shard (or chunk) -- see
+    # write_new_pyramid for why small dask blocks don't scale.
+    source_shards = coarsest_array.shards
+    work_blocks = source_shards if source_shards is not None else coarsest_array.chunks
+    data = da.from_array(coarsest_array, chunks=work_blocks)
     for i, path in enumerate(new_paths):
-        # Rechunk back to the stored chunk shape first: each downsample halves
-        # the dask chunks, which would otherwise shrink below the Gaussian
-        # halo depth after a few levels.
-        data = downsample(data.rechunk(coarsest_array.chunks), downsample_func=downsample_func)
+        # Rechunk back to work_blocks first: each downsample halves the dask
+        # blocks, which would otherwise shrink below the Gaussian halo depth
+        # after a few levels.
+        data = downsample(data.rechunk(work_blocks), downsample_func=downsample_func)
         chunk_shape = tuple(
             min(chunk, size) for chunk, size in zip(coarsest_array.chunks, data.shape, strict=True)
+        )
+        # Shrink shards that would overhang a small level, keeping each a
+        # multiple of its chunk shape (a Zarr v3 requirement).
+        shard_shape = (
+            tuple(
+                min(shard, -(-size // chunk) * chunk)
+                for shard, chunk, size in zip(source_shards, chunk_shape, data.shape, strict=True)
+            )
+            if source_shards is not None
+            else None
         )
         new_levels.append(
             NewLevel(
@@ -70,6 +85,7 @@ def _build_coarser_levels(
                 array=data,
                 chunks=chunk_shape,
                 scale=[s * 2 ** (i + 1) for s in coarsest_scale],
+                shards=shard_shape,
             )
         )
     return new_levels

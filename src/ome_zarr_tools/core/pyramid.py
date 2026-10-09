@@ -49,6 +49,7 @@ class NewLevel:
     array: DaskArray | Any
     chunks: tuple[int, ...]
     scale: list[float]
+    shards: tuple[int, ...] | None = None
 
 
 def next_new_paths(
@@ -166,6 +167,7 @@ def commit_new_levels(
                         shape=level.array.shape,
                         dtype=level.array.dtype,
                         chunks=level.chunks,
+                        shards=level.shards,
                         dimension_names=dimension_names,
                     )
                     break
@@ -178,7 +180,12 @@ def commit_new_levels(
             written_paths.append(level.path)
             used_paths.add(level.path)
             targets.append(target)
-            sources.append(da.asarray(level.array))
+            source = da.asarray(level.array)
+            if level.shards is not None:
+                # One dask block per shard, as in write_new_pyramid: several
+                # blocks writing into one shard would each read-modify-write it.
+                source = source.rechunk(level.shards)
+            sources.append(source)
         # One combined store call across every new level, not one per level:
         # when new_levels chain lazily (each downsampling the one before it,
         # e.g. `downsample --num_levels N`), storing them one at a time would
