@@ -124,7 +124,6 @@ def from_images(
         click.echo(f"Using {'directory' if stack_dir else 'pattern'}: {stack_dir or stack_pattern}")
         arr = read_stack(Path(stack_dir) if stack_dir else None, stack_pattern)
 
-    arr = arr.rechunk(chunk_size)
     click.echo(f"Converting to OME-Zarr at {output_zarr} (shape={arr.shape})")
 
     write_new_pyramid(

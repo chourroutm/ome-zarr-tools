@@ -2,9 +2,10 @@ import dask
 import dask.array as da
 import numpy as np
 import pytest
+import scipy.ndimage
 
 from ome_zarr_tools.core.errors import CliError
-from ome_zarr_tools.core.resample import intensity_downsample, label_downsample
+from ome_zarr_tools.core.resample import intensity_downsample, label_downsample, label_smooth
 
 
 def _counting_lazy_array(data: np.ndarray, chunks) -> tuple[da.Array, dict]:
@@ -309,3 +310,39 @@ def test_label_downsample_single_chunk_axis_smaller_than_halo_depth():
 
     assert result.shape == reference.shape == (1, 4, 4)
     assert np.array_equal(result, reference)
+
+
+def _whole_array_label_smooth(labels: np.ndarray, sigma: float) -> np.ndarray:
+    """Ground truth: the previous whole-array ``upsample --smooth`` implementation."""
+    values = np.unique(labels)
+    channels = np.stack(
+        [scipy.ndimage.gaussian_filter((labels == v).astype(float), sigma) for v in values]
+    )
+    return values[np.argmax(channels, axis=0)].astype(labels.dtype)
+
+
+def test_label_smooth_never_triggers_computation():
+    labels = np.random.default_rng(0).integers(0, 3, size=(16, 16, 16)).astype("uint8")
+    lazy, calls = _counting_lazy_array(labels, (8, 8, 8))
+
+    result = label_smooth(lazy, 1.0)
+
+    assert isinstance(result, da.Array)
+    assert calls["n"] == 0
+
+
+@pytest.mark.parametrize("sigma", [0.5, 1.0, 2.0])
+def test_label_smooth_multi_chunk_matches_whole_array_smoothing(sigma):
+    """Chunk-wise smoothing with a halo must give exactly the whole-array
+    result, including labels confined to one chunk and an irregular
+    remainder chunk."""
+    rng = np.random.default_rng(7)
+    labels = rng.integers(0, 3, size=(30, 27, 21)).astype("uint8")
+    labels[25:, 20:, 18:] = 9  # a label present only in the corner chunk
+    multi_chunk = da.from_array(labels, chunks=(8, 8, 8))
+
+    result = label_smooth(multi_chunk, sigma).compute()
+
+    assert result.shape == labels.shape
+    assert set(np.unique(result)) <= set(np.unique(labels))
+    np.testing.assert_array_equal(result, _whole_array_label_smooth(labels, sigma))

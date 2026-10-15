@@ -49,6 +49,7 @@ class NewLevel:
     array: DaskArray | Any
     chunks: tuple[int, ...]
     scale: list[float]
+    shards: tuple[int, ...] | None = None
 
 
 def next_new_paths(
@@ -166,6 +167,7 @@ def commit_new_levels(
                         shape=level.array.shape,
                         dtype=level.array.dtype,
                         chunks=level.chunks,
+                        shards=level.shards,
                         dimension_names=dimension_names,
                     )
                     break
@@ -178,7 +180,12 @@ def commit_new_levels(
             written_paths.append(level.path)
             used_paths.add(level.path)
             targets.append(target)
-            sources.append(da.asarray(level.array))
+            source = da.asarray(level.array)
+            if level.shards is not None:
+                # One dask block per shard, as in write_new_pyramid: several
+                # blocks writing into one shard would each read-modify-write it.
+                source = source.rechunk(level.shards)
+            sources.append(source)
         # One combined store call across every new level, not one per level:
         # when new_levels chain lazily (each downsampling the one before it,
         # e.g. `downsample --num_levels N`), storing them one at a time would
@@ -283,6 +290,15 @@ def write_new_pyramid(
 
     group = zarr.group(store=str(path), overwrite=True, zarr_format=zarr_format)
 
+    # Dask works in one block per zarr shard (or per chunk, unsharded) at
+    # every level. Shard-sized blocks keep the task graph small -- 64^3 dask
+    # blocks for a ~7500x7000x7000 stack meant ~650M tasks, which never got
+    # past single-threaded graph construction -- and each shard is then
+    # written by exactly one task: several blocks writing into one shard
+    # would each read-modify-write the whole shard (or race).
+    work_blocks = shard_shape if shard_shape is not None else chunk_shape
+    arr = arr.rechunk(work_blocks)
+
     level0_shape = tuple(arr.shape)
     sources: list[DaskArray] = [arr]
     datasets: list[dict[str, Any]] = [
@@ -291,7 +307,10 @@ def write_new_pyramid(
 
     data = arr
     for level in range(1, num_downsampling + 1):
-        data = intensity_downsample(data, downsample_func=downsample_func)
+        # Rechunk back to work_blocks first: each downsample halves the dask
+        # blocks, so without this they'd shrink below the Gaussian halo depth
+        # after a few levels (e.g. 64 -> 2 by level 6) and map_overlap fails.
+        data = intensity_downsample(data.rechunk(work_blocks), downsample_func=downsample_func)
         sources.append(data)
         scale = [v * (level0_shape[i] / data.shape[i]) for i, v in enumerate(voxel_size)]
         datasets.append(
@@ -310,7 +329,7 @@ def write_new_pyramid(
         )
         for level, source in enumerate(sources)
     ]
-    da.store(sources, targets)  # type: ignore[arg-type]
+    da.store([source.rechunk(work_blocks) for source in sources], targets)  # type: ignore[arg-type]
 
     axes: list[dict[str, Any]] = [
         {"name": name, "type": axis_type, "unit": unit}

@@ -1,10 +1,12 @@
 import hashlib
 
+import dask.array as da
 import numpy as np
 import zarr
 from click.testing import CliRunner
 
 from ome_zarr_tools.commands.downsample import downsample
+from ome_zarr_tools.core.pyramid import write_new_pyramid
 
 
 def _checksum_dir(path) -> str:
@@ -124,3 +126,44 @@ def test_downsample_label_never_produces_a_value_absent_from_the_source(sample_m
     new_path = _level_paths(group)[-1]
     new_values = set(np.unique(group[new_path][:]).tolist())
     assert new_values <= {0, 1}
+
+
+def _write_v3_dataset(path, data, shard_shape):
+    write_new_pyramid(
+        path,
+        da.from_array(data),
+        num_downsampling=0,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=["micrometer"] * 3,
+        voxel_size=[1.0, 1.0, 1.0],
+        chunk_shape=(8, 8, 8),
+        shard_shape=shard_shape,
+        zarr_format=3,
+        image_name="Image",
+    )
+
+
+def test_downsample_keeps_the_source_sharding_and_matches_unsharded_output(tmp_path):
+    data = np.random.default_rng(5).random((64, 80, 80)).astype("float32")
+    sharded, unsharded = tmp_path / "sharded.zarr", tmp_path / "unsharded.zarr"
+    _write_v3_dataset(sharded, data, (32, 32, 32))
+    _write_v3_dataset(unsharded, data, None)
+
+    runner = CliRunner()
+    for path in (sharded, unsharded):
+        result = runner.invoke(downsample, [str(path), "--num_levels", "3"])
+        assert result.exit_code == 0, result.output
+
+    sharded_group = zarr.open_group(str(sharded), mode="r")
+    unsharded_group = zarr.open_group(str(unsharded), mode="r")
+    for level in ("1", "2", "3"):
+        assert unsharded_group[level].shards is None
+        np.testing.assert_array_equal(sharded_group[level][:], unsharded_group[level][:])
+    # Shards shrink to fit small levels but stay chunk multiples: (32, 40, 40) -> (32, 32, 32);
+    # (16, 20, 20) -> chunks (8, 8, 8), shards (16, 24, 24); (8, 10, 10) -> (8, 16, 16).
+    assert [sharded_group[level].shards for level in ("1", "2", "3")] == [
+        (32, 32, 32),
+        (16, 24, 24),
+        (8, 16, 16),
+    ]

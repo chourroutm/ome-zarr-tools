@@ -336,3 +336,61 @@ def test_write_new_pyramid_never_processes_more_than_one_chunk_at_a_time(tmp_pat
     real_shapes = [shape for shape in seen_shapes if 0 not in shape]
     assert real_shapes
     assert all(shape == chunk_shape for shape in real_shapes)
+
+
+def test_write_new_pyramid_deep_pyramid_does_not_shrink_chunks_below_halo(tmp_path):
+    """Regression: each level used to halve the dask chunks without rechunking,
+    so after a few levels they fell below the Gaussian halo depth (3) and
+    map_overlap raised "Overlap depth is larger than smallest chunksize"."""
+    path = tmp_path / "deep.zarr"
+    arr = da.random.random((128, 128, 128), chunks=(8, 8, 8)).astype("float32")
+
+    write_new_pyramid(
+        path,
+        arr,
+        5,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=["micrometer"] * 3,
+        voxel_size=[1.0, 1.0, 1.0],
+        chunk_shape=(8, 8, 8),
+        shard_shape=None,
+        zarr_format=3,
+        image_name="Image",
+    )
+
+    group = zarr.open_group(str(path), mode="r")
+    assert [group[str(level)].shape for level in range(6)] == [(128 >> n,) * 3 for n in range(6)]
+
+
+def test_write_new_pyramid_stores_one_dask_block_per_shard(tmp_path, monkeypatch):
+    """Several dask blocks writing into one shard would each rewrite the whole
+    shard (or race); every source handed to da.store must be blocked by shard."""
+    path = tmp_path / "sharded.zarr"
+    arr = da.random.random((64, 64, 64), chunks=(8, 8, 8)).astype("float32")
+    seen_chunks = []
+    real_store = da.store
+
+    def _tracking_store(sources, targets, **kwargs):
+        seen_chunks.extend(source.chunks for source in sources)
+        return real_store(sources, targets, **kwargs)
+
+    monkeypatch.setattr(da, "store", _tracking_store)
+
+    write_new_pyramid(
+        path,
+        arr,
+        2,
+        axes_names=["z", "y", "x"],
+        axes_types=["space", "space", "space"],
+        axes_units=["micrometer"] * 3,
+        voxel_size=[1.0, 1.0, 1.0],
+        chunk_shape=(8, 8, 8),
+        shard_shape=(32, 32, 32),
+        zarr_format=3,
+        image_name="Image",
+    )
+
+    assert seen_chunks == [((32, 32),) * 3, ((32,),) * 3, ((16,),) * 3]
+    group = zarr.open_group(str(path), mode="r")
+    np.testing.assert_array_equal(group["0"][:], arr.compute())

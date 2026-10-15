@@ -5,31 +5,13 @@ from pathlib import Path
 
 import click
 import dask.array as da
-import numpy as np
-import scipy.ndimage
 import zarr
 
 from ome_zarr_tools.core.errors import CliError
 from ome_zarr_tools.core.pyramid import NewLevel, commit_new_levels, next_new_paths
-from ome_zarr_tools.core.resample import nearest_upsample
+from ome_zarr_tools.core.resample import label_smooth, nearest_upsample
 from ome_zarr_tools.core.zarr_path import ZarrPathParamType, validate_output_path
 from ome_zarr_tools.io.ome_metadata import read_multiscales
-
-
-def _smooth_labels(level: np.ndarray, sigma: float) -> np.ndarray:
-    """Soften ``level``'s label boundaries, re-snapping every voxel to the
-    nearest *original* discrete label value (FR-010) -- never leaving a
-    blurred/non-discrete value. Decomposes into one channel per distinct
-    label, smooths each independently, then takes the per-voxel argmax --
-    the standard correct technique for smoothing categorical data (naively
-    blurring the raw label array would treat label values as ordinal, which
-    is wrong for anything but a binary mask; see research.md).
-    """
-    labels = np.unique(level)
-    channels = np.stack(
-        [scipy.ndimage.gaussian_filter((level == label).astype(float), sigma) for label in labels]
-    )
-    return labels[np.argmax(channels, axis=0)].astype(level.dtype)
 
 
 def _build_new_finer_levels(
@@ -58,17 +40,30 @@ def _build_new_finer_levels(
 
     new_paths = next_new_paths(existing_datasets, num_levels, group=group)
     new_levels: list[NewLevel] = []
-    source_array: da.Array = da.from_array(finest_array, chunks=finest_array.chunks)
-    source_scale = list(finest_scale)
+    # New levels keep the finest level's chunk and shard shapes (shards None
+    # for unsharded or Zarr v2) -- every new level is larger, so both always
+    # fit. Dask works in one block per shard (or chunk), as in downsample.
     source_chunks = finest_array.chunks
+    source_shards = finest_array.shards
+    work_blocks = source_shards if source_shards is not None else source_chunks
+    source_array: da.Array = da.from_array(finest_array, chunks=work_blocks)
+    source_scale = list(finest_scale)
     for path in new_paths:
         upsampled = nearest_upsample(source_array)
+        # nearest_upsample doubles the dask blocks; rechunk so they don't
+        # keep growing level after level.
+        upsampled = upsampled.rechunk(work_blocks)
         if smooth is not None:
-            smoothed_np = _smooth_labels(upsampled.compute(), smooth)
-            upsampled = da.from_array(smoothed_np, chunks=source_chunks)
+            upsampled = label_smooth(upsampled, smooth)
         new_scale = [s / 2 for s in source_scale]
         new_levels.append(
-            NewLevel(path=path, array=upsampled, chunks=source_chunks, scale=new_scale)
+            NewLevel(
+                path=path,
+                array=upsampled,
+                chunks=source_chunks,
+                scale=new_scale,
+                shards=source_shards,
+            )
         )
         source_array = upsampled
         source_scale = new_scale
